@@ -1,0 +1,120 @@
+:root {
+  --accent: #76b900; /* NVIDIA green */
+  --bg-dark: #0a0a0a;
+  --text-dark: #111;
+  --text-light: #f8f8f8;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Navbar styling (matches homepage) */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 20px 60px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.nav-left {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+.nav-right a {
+  color: var(--text-dark);
+  text-decoration: none;
+  margin-left: 24px;
+  font-weight: 500;
+}
+.nav-right a:hover {
+  color: var(--accent);
+}
+
+/* Login main layout */
+.login-container {
+  background: linear-gradient(180deg, #ffffff 0%, #f3f4f6 100%);
+  min-height: calc(100vh - 80px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px;
+}
+
+.login-box {
+  background: white;
+  border-radius: 12px;
+  padding: 60px 80px;
+  max-width: 800px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+
+.login-box h1 {
+  font-size: 2.2rem;
+  color: var(--text-dark);
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #555;
+  font-size: 1rem;
+  margin-bottom: 36px;
+}
+
+.login-options {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+/* The clickable cards for Personal / Business */
+.login-card {
+  display: block;
+  background: #f7f7f7;
+  border-radius: 10px;
+  padding: 28px 32px;
+  width: 300px;
+  text-decoration: none;
+  color: var(--text-dark);
+  border: 2px solid transparent;
+  transition: all 0.25s ease;
+}
+
+.login-card h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.login-card p {
+  font-size: 0.95rem;
+  color: #555;
+  line-height: 1.4;
+}
+
+.login-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(118,185,0,0.15);
+  transform: translateY(-4px);
+  background: white;
+}
+
+/* Responsive */
+@media (max-width: 800px) {
+  .login-box {
+    padding: 40px 30px;
+  }
+  .login-card {
+    width: 100%;
+  }
+}

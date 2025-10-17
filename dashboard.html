@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>IC Detector — Dashboard</title>
+  <title>authentIC — Dashboard</title>
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/dashboard.css">
@@ -14,7 +14,10 @@
     <!-- TOP NAV (no search here) -->
     <nav class="top-nav">
       <div class="nav-left">
-        <div class="brand-title">IC Detector</div>
+        <a href="index.html" class="brand-link" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
+          <img src="assets/logo.png" alt="authentIC logo" style="width:28px;height:28px;" />
+          <div class="brand-title">authentIC</div>
+        </a>
       </div>
 
       <div class="nav-right">
@@ -37,7 +40,7 @@
             </svg>
           </button>
 
-          <button class="profile-btn" title="Profile">GS</button>
+          <button class="profile-btn" title="Profile">PS</button>
         </div>
       </div>
     </nav>
@@ -51,11 +54,6 @@
           <a class="menu-item active" href="dashboard.html">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
             <span>Dashboard</span>
-          </a>
-
-          <a class="menu-item" href="query.html">
-            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M13 11h8v2h-8v8h-2v-8H3v-2h8V3h2v8z" fill="currentColor"/></svg>
-            <span>New Chat</span>
           </a>
 
           <a class="menu-item" href="#">
@@ -73,14 +71,14 @@
       <div class="chats">
         <h4>Recent Chats</h4>
         <ul id="chatList">
-          <li class="chat-item"><div><h5>IC Check — Supplier A</h5></div><div class="time">Today</div></li>
-          <li class="chat-item"><div><h5>IC Check — Lot 12</h5></div><div class="time">Yesterday</div></li>
-          <li class="chat-item"><div><h5>IC Check — Sample 7</h5></div><div class="time">2d</div></li>
+          <li class="chat-item"><div><h5>IC Check — Texas Instruments</h5></div><div class="time">Today</div></li>
+          <li class="chat-item"><div><h5>IC Check — STMicroelectronics</h5></div><div class="time">Yesterday</div></li>
+          <li class="chat-item"><div><h5>IC Check — Analog Devices</h5></div><div class="time">2d</div></li>
         </ul>
       </div>
 
       <div class="sidebar-footer">
-        <small>© 2025 IC Detector</small>
+        <small>© 2025 authentIC</small>
       </div>
     </aside>
 
@@ -98,7 +96,7 @@
         <!-- Hello card spans columns 1..2 -->
         <div class="card welcome wide">
           <div>
-            <h2>Hello, Grace 👋</h2>
+            <h2>Hello, Priya 👋</h2>
             <p class="muted">You have <strong>3</strong> pending verifications today. Keep your supply chain safe.</p>
           </div>
           <div class="illustration" aria-hidden>
@@ -187,15 +185,15 @@
             <ul class="events">
               <li>
                 <div class="time">10:30</div>
-                <div class="details"><strong>Inspect Lot #A12</strong><div class="small muted">Supplier: AlphaElectro</div></div>
+                <div class="details"><strong>Inspect Lot #TI-2547</strong><div class="small muted">Supplier: Texas Instruments</div></div>
               </li>
               <li>
                 <div class="time">13:00</div>
-                <div class="details"><strong>Verify sample 77-2</strong><div class="small muted">Lab test pending</div></div>
+                <div class="details"><strong>Verify NXP MCU batch</strong><div class="small muted">Lab test pending</div></div>
               </li>
               <li>
                 <div class="time">15:45</div>
-                <div class="details"><strong>Batch audit: Lot #B3</strong><div class="small muted">Urgent</div></div>
+                <div class="details"><strong>Batch audit: Infineon ICs</strong><div class="small muted">Urgent</div></div>
               </li>
             </ul>
           </div>
@@ -206,10 +204,10 @@
           <h4>Linked contacts</h4>
           <div class="contact-list">
             <div class="contact">
-              <div class="avatar">MJ</div>
+              <div class="avatar">AS</div>
               <div>
-                <div class="name">Mary Johnson</div>
-                <div class="small muted">Quality Manager • mary@example.com</div>
+                <div class="name">Aarav Sharma</div>
+                <div class="small muted">Quality Manager • aarav.sharma@ti.com</div>
               </div>
               <div class="contact-actions">
                 <button class="icon-btn">✉️</button>
@@ -218,10 +216,10 @@
             </div>
 
             <div class="contact">
-              <div class="avatar">JB</div>
+              <div class="avatar">RP</div>
               <div>
-                <div class="name">James Brown</div>
-                <div class="small muted">Supplier Liaison • james@alpha.com</div>
+                <div class="name">Riya Patel</div>
+                <div class="small muted">Supplier Liaison • riya.patel@microchip.com</div>
               </div>
               <div class="contact-actions">
                 <button class="icon-btn">✉️</button>

@@ -14,7 +14,17 @@
     <!-- ✅ TOP NAVBAR -->
     <nav class="top-nav">
       <div class="nav-left">
-        <span class="nav-title">IC Detector</span>
+        <button id="toggleSidebar" class="sidebar-toggle" aria-label="Toggle sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <a href="index.html" class="brand-link">
+          <img src="assets/logo.png" alt="authentIC logo" class="brand-logo" />
+          <span class="nav-title">authentIC</span>
+        </a>
       </div>
       <div class="nav-right">
         <button class="profile-btn">
@@ -36,13 +46,6 @@
           <path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
         </svg>
         <span>Dashboard</span>
-      </a>
-
-      <a class="menu-item active" href="query.html">
-        <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24">
-          <path fill="currentColor" d="M13 11h8v2h-8v8h-2v-8H3v-2h8V3h2v8z"/>
-        </svg>
-        <span>New Chat</span>
       </a>
 
       <a class="menu-item" href="#">
@@ -67,18 +70,13 @@
   </div>
 
   <div class="sidebar-footer">
-    <small>© 2025 IC Detector</small>
+    <small>© 2025 authentIC</small>
   </div>
 </aside>
 
 
     <!-- MAIN -->
     <main class="main">
-      <header class="main-header left">
-        <h1>Detect Fake ICs</h1>
-        <p class="muted">Attach an image and describe what you want to verify.</p>
-      </header>
-
       <section class="chat-area">
         <div id="messages" class="messages">
           <div class="empty-state">
@@ -87,22 +85,29 @@
         </div>
       </section>
 
-      <div class="composer-left">
-        <label class="file-label" id="attachLabel" title="Attach image">
-  <div class="attach-icon">
-    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-    <path d="M21 12.79V17a5 5 0 0 1-10 0V7a3 3 0 0 1 6 0v8a1 1 0 0 1-2 0V8" />
-  </svg>
-  </div>
-  <input id="imgInput" type="file" accept="image/*" />
-  <span class="attach-text">Attach Image</span>
-</label>
-
-      </div>
-
-      <div class="composer-right">
+      <div class="composer">
+        <div id="imagePreview" class="image-preview" style="display:none;">
+          <div class="preview-container">
+            <img id="previewImg" src="" alt="Preview" />
+            <button id="removePreview" class="remove-preview" type="button" title="Remove image">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
         <textarea id="prompt" placeholder="Describe the IC markings or upload an image for analysis."></textarea>
         <div class="composer-actions">
+          <label class="file-label" id="attachLabel" title="Attach image">
+            <div class="attach-icon">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M21 12.79V17a5 5 0 0 1-10 0V7a3 3 0 0 1 6 0v8a1 1 0 0 1-2 0V8" />
+              </svg>
+            </div>
+            <input id="imgInput" type="file" accept="image/*" />
+            <span class="attach-text">Attach Image</span>
+          </label>
           <button id="sendBtn" class="btn-send">Detect</button>
           <button id="saveChatBtn" class="btn-secondary">Save Chat</button>
         </div>

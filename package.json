@@ -1,0 +1,48 @@
+{
+  "name": "authentic-ic",
+  "version": "1.0.0",
+  "description": "authentIC - AI-powered IC authenticity detection desktop application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "com.authentic.ic",
+    "productName": "authentIC",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*",
+      "!dist/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/logo.png",
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/logo.png"
+    }
+  },
+  "keywords": [
+    "IC",
+    "authenticity",
+    "counterfeit",
+    "detection",
+    "electron"
+  ],
+  "author": "authentIC Team",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}
+

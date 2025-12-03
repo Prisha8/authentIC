@@ -19,18 +19,17 @@
   align-items: center;
   background: white;
   padding: 20px 60px;
-  position: fixed;
-  width: 100%;
-  top: 0;
-  left: 0;
-  z-index: 100;
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .nav-left {
   font-size: 1.3rem;
   font-weight: 700;
   color: var(--text-dark);
+  cursor: pointer;
 }
 
 .nav-right a {
@@ -53,7 +52,6 @@
   display: flex;
   align-items: center;
   height: 100vh;
-  margin-top: 80px; /* for fixed navbar */
   width: 100%;
   overflow: hidden;
   position: relative;

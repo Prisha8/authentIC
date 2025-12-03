@@ -5,19 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>authentIC — Login</title>
 
-  <!-- Google Font + CSS -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <!-- Using system fonts for offline support -->
   <link rel="stylesheet" href="css/login.css">
 </head>
 <body>
   <header class="navbar">
-    <div class="nav-left" style="display:flex;align-items:center;gap:10px;">
+    <a href="index.html" class="nav-left" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;">
       <img src="assets/logo.png" alt="authentIC logo" style="width:28px;height:28px;" />
       <span>authentIC</span>
-    </div>
-    <nav class="nav-right">
-      <a href="index.html">Home</a>
-    </nav>
+    </a>
   </header>
 
   <main class="login-container">
@@ -37,6 +33,132 @@
         </a>
       </div>
     </div>
+
+    <!-- PERFORMANCE HIGHLIGHTS (copied from homepage) -->
+    <section id="performance" class="performance-highlights">
+      <div class="container">
+        <h2>Performance Highlights</h2>
+        <p class="lead">Key platform metrics — accuracy, speed and scale you can rely on.</p>
+
+        <div class="metric-grid">
+          <!-- Donut: Visual match (static 92%) -->
+          <div class="metric-card">
+            <div class="metric-visual">
+              <svg class="donut" viewBox="0 0 36 36" data-value="92" aria-hidden>
+                <path class="donut-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"></path>
+                <path class="donut-fill" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"></path>
+                <text x="50%" y="50%" class="donut-text">92%</text>
+              </svg>
+            </div>
+            <div class="metric-body">
+              <div class="metric-title">Visual match</div>
+              <div class="metric-sub">AI visual comparison vs known-good samples</div>
+            </div>
+          </div>
+
+          <!-- Progress meter: Avg detection time (static 1.2s) -->
+          <div class="metric-card">
+            <div class="metric-visual meter-wrap">
+              <div class="meter" role="progressbar" aria-label="Average detection time">
+                <div class="meter-fill" data-value="1.2" style="width:48%"></div>
+              </div>
+              <div class="meter-label"><span class="meter-value">1.2</span>s</div>
+            </div>
+            <div class="metric-body">
+              <div class="metric-title">Avg detection time</div>
+              <div class="metric-sub">Average time from upload to result</div>
+            </div>
+          </div>
+
+          <!-- Big stat: ICs verified (static 500+) -->
+          <div class="metric-card stat-card">
+            <div class="big-number-visual">
+              <div class="big-number">
+                <div class="count" data-target="500">500</div>
+                <div class="count-suffix">+</div>
+              </div>
+            </div>
+
+            <div class="metric-body stat-body">
+              <div class="metric-title">ICs verified</div>
+              <div class="metric-sub">Verified against our curated database</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KEY FEATURES (copied from homepage) -->
+    <section id="features" class="features">
+      <div class="container">
+        <h2>Key features</h2>
+
+        <div class="features-grid" role="list">
+          <!-- Live confidence scoring -->
+          <article class="feature-card" role="listitem">
+            <div class="feature-icon" aria-hidden>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M3 12a9 9 0 1 0 18 0" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 12l4-4" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="1" fill="currentColor"/>
+              </svg>
+            </div>
+            <h3 class="feature-title">Live confidence scoring</h3>
+            <p class="feature-desc">Per-sample confidence shown instantly so you can prioritise reviews.</p>
+          </article>
+
+          <!-- AI marking analysis -->
+          <article class="feature-card" role="listitem">
+            <div class="feature-icon" aria-hidden>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M20.59 13.41L11 3 3 10.94V21h10.06L20.59 13.41z" stroke-linejoin="round" stroke-linecap="round"/>
+                <circle cx="7.5" cy="8.5" r="1.2" fill="currentColor"/>
+              </svg>
+            </div>
+            <h3 class="feature-title">AI marking analysis</h3>
+            <p class="feature-desc">Automatic inspection of package markings, fonts and logos to flag anomalies.</p>
+          </article>
+
+          <!-- Batch audit mode -->
+          <article class="feature-card" role="listitem">
+            <div class="feature-icon" aria-hidden>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <rect x="3" y="4" width="18" height="5" rx="1.2" stroke-linejoin="round"/>
+                <rect x="3" y="10.5" width="18" height="5" rx="1.2" stroke-linejoin="round"/>
+                <rect x="3" y="17" width="18" height="5" rx="1.2" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h3 class="feature-title">Batch audit mode</h3>
+            <p class="feature-desc">Process entire lots in one run—export reports and mark suspicious batches.</p>
+          </article>
+
+          <!-- Secure cloud storage -->
+          <article class="feature-card" role="listitem">
+            <div class="feature-icon" aria-hidden>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M20 17.5A4.5 4.5 0 0 0 12 13.8 6 6 0 1 0 6 18" stroke-linecap="round" stroke-linejoin="round"/>
+                <rect x="9" y="14" width="6" height="4" rx="0.8" />
+                <path d="M11 14v-1a1 1 0 1 1 2 0v1" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h3 class="feature-title">Secure cloud storage</h3>
+            <p class="feature-desc">Encrypted uploads and role-based access keep your IP and reports safe.</p>
+          </article>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="footer-inner">
+      <div class="footer-col about">
+        <h4>About us</h4>
+        <p>
+          authentIC uses AI-driven visual and metadata analysis to identify counterfeit integrated circuits
+          quickly and reliably — protecting manufacturers and supply chains with fast, secure verification.
+        </p>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>

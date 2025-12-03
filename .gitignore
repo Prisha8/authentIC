@@ -1,2 +1,19 @@
 *.env
 *env*
+
+# Node modules
+node_modules/
+
+# Electron build outputs
+dist/
+build/
+out/
+release/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

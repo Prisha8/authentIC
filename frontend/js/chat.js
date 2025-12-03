@@ -1,4 +1,10 @@
 // chat.js — chat UI + collapsible sidebar + Save Chat behavior
+// Check if user is logged in
+const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
+if (isLoggedIn !== 'true') {
+  window.location.href = 'login.html';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Elements
   const sidebar = document.getElementById('sidebar');
@@ -112,15 +118,15 @@ document.addEventListener('DOMContentLoaded', () => {
         container.appendChild(stepsDiv);
       } else {
         // Regular message
-        const div = document.createElement('div');
-        div.className = 'msg ' + (m.role === 'user' ? 'user' : 'bot');
-        if(m.img){
-          const im = document.createElement('img');
-          im.src = m.img;
-          div.appendChild(im);
-        }
+      const div = document.createElement('div');
+      div.className = 'msg ' + (m.role === 'user' ? 'user' : 'bot');
+      if(m.img){
+        const im = document.createElement('img');
+        im.src = m.img;
+        div.appendChild(im);
+      }
         if(m.text){
-          const p = document.createElement('div');
+      const p = document.createElement('div');
           // Simple markdown-style formatting
           let formattedText = m.text
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
@@ -132,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
           p.innerHTML = formattedText;
           p.style.whiteSpace = 'pre-line';
           p.style.lineHeight = '1.6';
-          div.appendChild(p);
+      div.appendChild(p);
         }
         
         // Add download button if report is available
@@ -151,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
           div.appendChild(downloadBtn);
         }
         
-        container.appendChild(div);
+      container.appendChild(div);
       }
     });
     messagesEl.appendChild(container);
@@ -284,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Mark current step as active
         thinkingMsg._steps[currentStep].status = 'active';
-        renderMessages();
+      renderMessages();
         
         const currentDelay = thinkingMsg._steps[currentStep].delay;
         currentStep++;
@@ -298,10 +304,10 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMessages();
 
         // Small delay before showing final result
-        setTimeout(() => {
+    setTimeout(() => {
           // Remove the thinking message
-          const idx = chat.messages.findIndex(m => m._thinking);
-          if(idx !== -1) chat.messages.splice(idx, 1);
+      const idx = chat.messages.findIndex(m => m._thinking);
+      if(idx !== -1) chat.messages.splice(idx, 1);
 
           // Fixed analysis for SN74AHC04N (TI logic inverter)
           const confidence = 90;
@@ -355,15 +361,15 @@ I have generated a detailed report bundle including SR-enhanced marking crop, lo
           chat.messages.push({ role:'bot', text: result, time: Date.now(), _hasReport: true, _reportId: 'report_' + Date.now() });
 
           // Re-enable controls
-          if(sendBtn) sendBtn.disabled = false;
-          if(promptEl) promptEl.disabled = false;
+      if(sendBtn) sendBtn.disabled = false;
+      if(promptEl) promptEl.disabled = false;
 
-          renderMessages();
-          renderChatList();
+      renderMessages();
+      renderChatList();
         }, 600);
       }
     }
-    
+
     // Start processing
     processNextStep();
 
@@ -395,12 +401,22 @@ I have generated a detailed report bundle including SR-enhanced marking crop, lo
       sidebar.classList.add('collapsed');
     }
   });
+  
+  // Handle logout
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      localStorage.removeItem('authentIC_loggedIn');
+      localStorage.removeItem('authentIC_userType');
+      window.location.href = 'login.html';
+    });
+  }
 
   // helper to escape html
   function escapeHtml(str){
     return String(str).replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
   }
-  
+
   // Generate and download PDF report
   function generatePDFReport(message){
     const reportContent = `authentIC - IC Authenticity Report
@@ -455,6 +471,6 @@ This report is generated for demonstration purposes.
     window.history.replaceState({}, '', 'query.html');
   } else if (chats.length === 0) {
     // create default demo chat only if no chats exist
-    createChat('IC Check 1');
+  createChat('IC Check 1');
   }
 });

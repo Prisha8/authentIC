@@ -1,3 +1,9 @@
+// Check if user is already logged in
+const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
+if (isLoggedIn === 'true') {
+  window.location.href = 'dashboard.html';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Personal form
   const personalForm = document.getElementById('personalForm');
@@ -13,7 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   btn.disabled = true;
 
   setTimeout(() => {
-    window.location.href = 'query.html';
+    localStorage.setItem('authentIC_loggedIn', 'true');
+    localStorage.setItem('authentIC_userType', 'personal');
+    window.location.href = 'dashboard.html';
   }, 1200);
     });
     const pGoogle = document.getElementById('pGoogle');
@@ -38,7 +46,9 @@ document.addEventListener('DOMContentLoaded', () => {
   btn.disabled = true;
 
   setTimeout(() => {
-    window.location.href = 'query.html';
+    localStorage.setItem('authentIC_loggedIn', 'true');
+    localStorage.setItem('authentIC_userType', 'personal');
+    window.location.href = 'dashboard.html';
   }, 1200);
     });
     const bGoogle = document.getElementById('bGoogle');

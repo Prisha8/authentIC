@@ -666,8 +666,8 @@ I have generated a detailed report bundle including SR-enhanced marking crop, lo
   // Setup language dropdown
   setupLanguageDropdown();
 
-  // Setup language dropdown
-  setupLanguageDropdown();
+  // Setup search overlay
+  setupSearchOverlay();
 
   // basic esc to close collapsed sidebar on mobile: clicking outside closes (optional)
   document.addEventListener('click', (e) => {
@@ -1027,4 +1027,127 @@ function setupLanguageDropdown() {
       console.log(`[Chat] Language changed to: ${option.textContent}`);
     });
   });
+}
+
+// Setup search overlay functionality
+function setupSearchOverlay() {
+  const searchChatsBtn = document.getElementById('searchChatsBtn');
+  const searchOverlay = document.getElementById('searchOverlay');
+  const closeSearchBtn = document.getElementById('closeSearchBtn');
+  const searchChatInput = document.getElementById('searchChatInput');
+  const searchResults = document.getElementById('searchResults');
+
+  if (!searchChatsBtn || !searchOverlay || !closeSearchBtn || !searchChatInput || !searchResults) {
+    console.log('[Chat] Search overlay elements not found');
+    return;
+  }
+
+  // Open search overlay
+  searchChatsBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('[Chat] Opening search overlay');
+    searchOverlay.style.display = 'flex';
+    setTimeout(() => {
+      searchChatInput.focus();
+    }, 100);
+    // Load all chats for search
+    performSearch('');
+  });
+
+  // Close search overlay
+  function closeSearchOverlay() {
+    searchOverlay.style.display = 'none';
+    searchChatInput.value = '';
+    searchResults.innerHTML = '';
+  }
+
+  closeSearchBtn.addEventListener('click', closeSearchOverlay);
+
+  // Close on overlay background click
+  searchOverlay.addEventListener('click', (e) => {
+    if (e.target === searchOverlay) {
+      closeSearchOverlay();
+    }
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && searchOverlay.style.display === 'flex') {
+      closeSearchOverlay();
+    }
+  });
+
+  // Perform search as user types
+  searchChatInput.addEventListener('input', (e) => {
+    const query = e.target.value.trim().toLowerCase();
+    performSearch(query);
+  });
+
+  // Perform search function
+  async function performSearch(query) {
+    console.log('[Chat] Performing search with query:', query);
+    
+    try {
+      // Get all chats from Supabase or local storage
+      let allChats = [];
+      
+      if (typeof chatService !== 'undefined') {
+        try {
+          allChats = await chatService.getUserChats();
+          console.log('[Chat] Loaded', allChats.length, 'chats from Supabase');
+        } catch (error) {
+          console.error('[Chat] Error loading chats from Supabase:', error);
+          // Fallback to local chats array if available
+          if (typeof chats !== 'undefined') {
+            allChats = chats;
+          }
+        }
+      } else if (typeof chats !== 'undefined') {
+        allChats = chats;
+      }
+
+      // Filter chats based on query
+      const filteredChats = query === '' 
+        ? allChats 
+        : allChats.filter(chat => 
+            chat.title.toLowerCase().includes(query)
+          );
+
+      // Render results
+      renderSearchResults(filteredChats);
+    } catch (error) {
+      console.error('[Chat] Error performing search:', error);
+      searchResults.innerHTML = '<div class="search-result-item"><div class="search-result-item-title">Error loading chats</div></div>';
+    }
+  }
+
+  // Render search results
+  function renderSearchResults(chats) {
+    if (chats.length === 0) {
+      searchResults.innerHTML = '<div class="search-result-item"><div class="search-result-item-title" style="color: var(--muted);">No chats found</div></div>';
+      return;
+    }
+
+    searchResults.innerHTML = chats.map(chat => {
+      const time = chatService && chat.updated_at 
+        ? chatService.formatTime(chat.updated_at)
+        : chat.time 
+        ? new Date(chat.time).toLocaleDateString()
+        : 'Recently';
+      
+      return `
+        <div class="search-result-item" data-chat-id="${chat.id}" onclick="window.location.href='query.html?chatId=${chat.id}'">
+          <div class="search-result-item-title">${escapeHtml(chat.title || 'Untitled Chat')}</div>
+          <div class="search-result-item-time">${time}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Helper function to escape HTML
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 }

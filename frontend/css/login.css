@@ -8,6 +8,7 @@
   --border: #e6e7ea;
   --muted: #6b7280;
   --text: #0f1724;
+  --shadow: 0 8px 22px rgba(16,24,40,0.04);
 }
 
 /* Dark mode variables */
@@ -20,6 +21,7 @@
   --bg-dark: #0a0a0a;
   --text-dark: #f1f5f9;
   --text-light: #f8f8f8;
+  --shadow: 0 8px 22px rgba(0,0,0,0.3);
 }
 
 * {
@@ -331,8 +333,9 @@ body {
 
 .big-number .count-suffix {
   font-size: 1.1rem;
-  color: #6b7280;
+  color: var(--muted);
   margin-bottom: 6px;
+  transition: color 0.2s;
 }
 
 .metric-title {
@@ -341,16 +344,18 @@ body {
 }
 
 .metric-sub {
-  color: #6b7280;
+  color: var(--muted);
   font-size: 0.95rem;
   word-break: break-word;
+  transition: color 0.2s;
 }
 
 /* Key Features Section (from homepage) */
 .features {
-  background: #fff;
+  background: var(--bg);
   padding: 64px 120px;
-  color: var(--text-dark);
+  color: var(--text);
+  transition: background 0.2s, color 0.2s;
 }
 
 .features .container {
@@ -363,6 +368,7 @@ body {
   margin-bottom: 28px;
   font-weight: 800;
   color: var(--text);
+  transition: color 0.2s;
 }
 
 .features-grid {
@@ -373,12 +379,13 @@ body {
 }
 
 .feature-card {
-  background: #fff;
+  background: var(--panel);
   border-radius: 12px;
   padding: 28px 20px;
   text-align: center;
-  box-shadow: 0 8px 22px rgba(16,24,40,0.04);
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  transition: transform 180ms ease, box-shadow 180ms ease, background 0.2s, border-color 0.2s;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -401,6 +408,12 @@ body {
   color: var(--accent);
   flex-shrink: 0;
   box-shadow: inset 0 -6px 14px rgba(0,0,0,0.02);
+  transition: background 0.2s;
+}
+
+.dark-mode .feature-icon {
+  background: rgba(118,185,0,0.15);
+  box-shadow: inset 0 -6px 14px rgba(0,0,0,0.1);
 }
 
 .feature-icon svg {
@@ -412,23 +425,26 @@ body {
   font-size: 1.05rem;
   font-weight: 700;
   margin: 0;
-  color: var(--text-dark);
+  color: var(--text);
+  transition: color 0.2s;
 }
 
 .feature-desc {
   font-size: 0.95rem;
-  color: #6b7280;
+  color: var(--muted);
   line-height: 1.6;
   margin: 0;
   max-width: 280px;
+  transition: color 0.2s;
 }
 
 /* Footer (from homepage) */
 .site-footer {
-  background: #040404;
-  color: var(--text-dark);
+  background: var(--panel);
+  color: var(--text);
   padding: 56px 24px;
   margin-top: 48px;
+  transition: background 0.2s, color 0.2s;
 }
 
 .site-footer .footer-inner {
@@ -440,10 +456,11 @@ body {
 }
 
 .site-footer .about h4 {
-  color: #ffffff;
+  color: var(--text);
   font-size: 1.25rem;
   margin: 0 0 12px;
   font-weight: 800;
+  transition: color 0.2s;
 }
 
 .site-footer .about p {

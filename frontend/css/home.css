@@ -407,16 +407,17 @@ body * {
 
 /* card base with hover effect */
 .metric-card {
-  background: #fff;
+  background: var(--panel);
   border-radius: 12px;
   padding: 18px;
   display: flex;
   gap: 14px;
   align-items: center;
-  box-shadow: 0 8px 22px rgba(16,24,40,0.04);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
   min-height: 150px;
   overflow: hidden;
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 0.2s, border-color 0.2s;
 }
 
 /* hover glow / lift */
@@ -439,7 +440,7 @@ body * {
 }
 
 /* meter: static styling (width set inline in HTML) */
-.meter { width: 100%; max-width:220px; height:14px; background:#f1f1f1; border-radius:999px; overflow:hidden; border:1px solid #ececec; }
+.meter { width: 100%; max-width:220px; height:14px; background:var(--bg); border-radius:999px; overflow:hidden; border:1px solid var(--border); }
 .meter-fill { height:100%; background: linear-gradient(90deg,var(--accent), #9fdc48); }
 
 /* stat card layout (third card) */
@@ -597,16 +598,11 @@ body * {
 }
 /* -------- Simple dark footer -------- */
 .site-footer {
-  background: var(--bg-dark, #040404);
-  color: var(--text-light, #f1f1f1);
+  background: var(--panel);
+  color: var(--text);
   padding: 56px 24px;
   margin-top: 48px;
   transition: background 0.2s, color 0.2s;
-}
-
-.dark-mode .site-footer {
-  background: #0a0a0a;
-  color: var(--text-light);
 }
 
 /* container centers content and limits width */
@@ -620,7 +616,7 @@ body * {
 
 /* About column */
 .site-footer .about h4 {
-  color: var(--text-light, #ffffff);
+  color: var(--text);
   font-size: 1.25rem;
   margin: 0 0 12px;
   font-weight: 800;

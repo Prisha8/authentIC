@@ -1,9 +1,30 @@
 // chat.js — chat UI + collapsible sidebar + Save Chat behavior
-// Check if user is logged in
-const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
-if (isLoggedIn !== 'true') {
-  window.location.href = 'login.html';
+// Check if user is logged in using Supabase
+
+// Load Supabase config first
+async function checkAuth() {
+  // Check Supabase session if available
+  if (typeof supabase !== 'undefined') {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (!session) {
+      window.location.href = 'login.html';
+      return false;
+    }
+    return true;
+  } else {
+    // Fallback to localStorage check
+    const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
+    if (isLoggedIn !== 'true') {
+      window.location.href = 'login.html';
+      return false;
+    }
+    return true;
+  }
 }
+
+// Wait for auth check before proceeding
+checkAuth().then((isAuthenticated) => {
+  if (!isAuthenticated) return;
 
 document.addEventListener('DOMContentLoaded', () => {
   // Elements
@@ -405,9 +426,15 @@ I have generated a detailed report bundle including SR-enhanced marking crop, lo
   // Handle logout
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+      // Sign out from Supabase if available
+      if (typeof supabase !== 'undefined') {
+        await supabase.auth.signOut();
+      }
+      // Clear localStorage
       localStorage.removeItem('authentIC_loggedIn');
       localStorage.removeItem('authentIC_userType');
+      localStorage.removeItem('authentIC_companyId');
       window.location.href = 'login.html';
     });
   }
@@ -474,3 +501,4 @@ This report is generated for demonstration purposes.
   createChat('IC Check 1');
   }
 });
+}); // End of checkAuth promise

@@ -39,6 +39,76 @@
   color: var(--accent);
 }
 
+/* Language Dropdown */
+.lang-dropdown {
+  position: relative;
+  z-index: 10001;
+}
+
+.lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid #e6e7ea;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-dark);
+  transition: all 0.2s;
+}
+
+.lang-btn:hover {
+  background: #f3f4f6;
+  border-color: var(--accent);
+}
+
+.lang-arrow {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+.lang-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: white;
+  border: 1px solid #e6e7ea;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 10000;
+  display: none;
+  padding: 4px 0;
+}
+
+.lang-menu.show {
+  display: block !important;
+}
+
+.lang-option {
+  padding: 10px 16px;
+  cursor: pointer;
+  color: var(--text-dark);
+  font-size: 0.9rem;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lang-option:hover {
+  background: #f3f4f6;
+}
+
+.lang-option.active {
+  background: var(--accent);
+  color: white;
+}
+
 /* Login main layout */
 .login-container {
   background: linear-gradient(180deg, #ffffff 0%, #f3f4f6 100%);

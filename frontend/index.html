@@ -19,9 +19,9 @@
     </a>
     <nav class="nav-right">
       <!-- Learn More now links to performance -->
-      <a href="#performance" id="learnLink">Learn More</a>
-      <a href="#about">About</a>
-      <a href="login.html">Login</a>
+      <a href="#performance" id="learnLink" data-i18n="nav.learnMore">Learn More</a>
+      <a href="#about" data-i18n="nav.about">About</a>
+      <a href="login.html" data-i18n="nav.login">Login</a>
     </nav>
   </header>
 
@@ -29,9 +29,9 @@
   <section class="hero">
     <div class="hero-left">
       <div class="hero-content">
-        <h1>Detect Counterfeit ICs with AI</h1>
-        <p>Fast visual & metadata analysis to protect your supply chain.</p>
-        <button id="learnMoreBtn">Learn More</button>
+        <h1 data-i18n="home.hero.title">Detect Counterfeit ICs with AI</h1>
+        <p data-i18n="home.hero.subtitle">Fast visual & metadata analysis to protect your supply chain.</p>
+        <button id="learnMoreBtn" data-i18n="home.hero.button">Learn More</button>
       </div>
     </div>
 
@@ -41,10 +41,10 @@
   </section>
 
   <!-- PERFORMANCE HIGHLIGHTS (new) -->
-  <section id="performance" class="performance-highlights">
-    <div class="container">
-      <h2>Performance Highlights</h2>
-      <p class="lead">Key platform metrics — accuracy, speed and scale you can rely on.</p>
+    <section id="performance" class="performance-highlights">
+      <div class="container">
+        <h2 data-i18n="home.performance.title">Performance Highlights</h2>
+        <p class="lead" data-i18n="home.performance.lead">Key platform metrics — accuracy, speed and scale you can rely on.</p>
 
       <div class="metric-grid">
   <!-- Donut: Visual match (static 92%) -->
@@ -57,8 +57,8 @@
       </svg>
     </div>
     <div class="metric-body">
-      <div class="metric-title">Visual match</div>
-      <div class="metric-sub">AI visual comparison vs known-good samples</div>
+      <div class="metric-title" data-i18n="home.performance.visualMatch">Visual match</div>
+      <div class="metric-sub" data-i18n="home.performance.visualMatchDesc">AI visual comparison vs known-good samples</div>
     </div>
   </div>
 
@@ -71,8 +71,8 @@
       <div class="meter-label"><span class="meter-value">1.2</span>s</div>
     </div>
     <div class="metric-body">
-      <div class="metric-title">Avg detection time</div>
-      <div class="metric-sub">Average time from upload to result</div>
+      <div class="metric-title" data-i18n="home.performance.avgTime">Avg detection time</div>
+      <div class="metric-sub" data-i18n="home.performance.avgTimeDesc">Average time from upload to result</div>
     </div>
   </div>
 
@@ -87,8 +87,8 @@
   </div>
 
   <div class="metric-body stat-body">
-    <div class="metric-title">ICs verified</div>
-    <div class="metric-sub">Verified against our curated database</div>
+    <div class="metric-title" data-i18n="home.performance.icsVerified">ICs verified</div>
+    <div class="metric-sub" data-i18n="home.performance.icsVerifiedDesc">Verified against our curated database</div>
   </div>
 </div>
 </div>
@@ -97,7 +97,7 @@
   <!-- ================= Key Features ================= -->
 <section id="features" class="features">
   <div class="container">
-    <h2>Key features</h2>
+    <h2 data-i18n="home.features.title">Key features</h2>
 
     <div class="features-grid" role="list">
       <!-- Live confidence scoring -->
@@ -110,8 +110,8 @@
             <circle cx="12" cy="12" r="1" fill="currentColor"/>
           </svg>
         </div>
-        <h3 class="feature-title">Live confidence scoring</h3>
-        <p class="feature-desc">Per-sample confidence shown instantly so you can prioritise reviews.</p>
+        <h3 class="feature-title" data-i18n="home.features.confidence">Live confidence scoring</h3>
+        <p class="feature-desc" data-i18n="home.features.confidenceDesc">Per-sample confidence shown instantly so you can prioritise reviews.</p>
       </article>
 
       <!-- AI marking analysis -->
@@ -123,8 +123,8 @@
             <circle cx="7.5" cy="8.5" r="1.2" fill="currentColor"/>
           </svg>
         </div>
-        <h3 class="feature-title">AI marking analysis</h3>
-        <p class="feature-desc">Automatic inspection of package markings, fonts and logos to flag anomalies.</p>
+        <h3 class="feature-title" data-i18n="home.features.marking">AI marking analysis</h3>
+        <p class="feature-desc" data-i18n="home.features.markingDesc">Automatic inspection of package markings, fonts and logos to flag anomalies.</p>
       </article>
 
       <!-- Batch audit mode -->
@@ -137,8 +137,8 @@
             <rect x="3" y="17" width="18" height="5" rx="1.2" stroke-linejoin="round"/>
           </svg>
         </div>
-        <h3 class="feature-title">Batch audit mode</h3>
-        <p class="feature-desc">Process entire lots in one run—export reports and mark suspicious batches.</p>
+        <h3 class="feature-title" data-i18n="home.features.batch">Batch audit mode</h3>
+        <p class="feature-desc" data-i18n="home.features.batchDesc">Process entire lots in one run—export reports and mark suspicious batches.</p>
       </article>
 
       <!-- Secure cloud storage -->
@@ -151,8 +151,8 @@
             <path d="M11 14v-1a1 1 0 1 1 2 0v1" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <h3 class="feature-title">Secure cloud storage</h3>
-        <p class="feature-desc">Encrypted uploads and role-based access keep your IP and reports safe.</p>
+        <h3 class="feature-title" data-i18n="home.features.storage">Secure cloud storage</h3>
+        <p class="feature-desc" data-i18n="home.features.storageDesc">Encrypted uploads and role-based access keep your IP and reports safe.</p>
       </article>
     </div>
   </div>
@@ -162,12 +162,14 @@
 
   
 
+  <script src="js/translations.js"></script>
+  <script src="js/translate-api.js"></script>
   <script src="js/home.js"></script>
   <footer class="site-footer" role="contentinfo">
   <div class="footer-inner">
     <div class="footer-col about">
-      <h4>About us</h4>
-      <p>
+      <h4 data-i18n="home.about.title">About us</h4>
+      <p data-i18n="home.about.text">
         authentIC uses AI-driven visual and metadata analysis to identify counterfeit integrated circuits
         quickly and reliably — protecting manufacturers and supply chains with fast, secure verification.
       </p>

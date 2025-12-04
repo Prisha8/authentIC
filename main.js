@@ -1,7 +1,13 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
+require('dotenv').config();
 
 let mainWindow;
+
+// Set app icon for macOS dock
+if (process.platform === 'darwin') {
+  app.dock.setIcon(path.join(__dirname, 'frontend/assets/logo.png'));
+}
 
 function createWindow() {
   // Create the browser window
@@ -15,7 +21,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
-      webSecurity: true
+      webSecurity: true,
+      preload: path.join(__dirname, 'preload.js'),
+      spellcheck: false
     },
     backgroundColor: '#fafafa',
     title: 'authentIC',

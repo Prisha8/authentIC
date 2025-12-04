@@ -22,7 +22,27 @@
 
       <div class="nav-right">
         <div class="nav-actions">
-          <div class="lang">ENG ▾</div>
+          <div class="lang-dropdown">
+            <button class="lang-btn" id="langBtn" aria-label="Select Language">
+              <span id="langDisplay">ENG</span>
+              <span class="lang-arrow">▾</span>
+            </button>
+            <div class="lang-menu" id="langMenu">
+              <div class="lang-option" data-lang="en" data-code="ENG">English</div>
+              <div class="lang-option" data-lang="hi" data-code="हिं">Hindi (हिंदी)</div>
+              <div class="lang-option" data-lang="bn" data-code="বাং">Bengali (বাংলা)</div>
+              <div class="lang-option" data-lang="te" data-code="తె">Telugu (తెలుగు)</div>
+              <div class="lang-option" data-lang="mr" data-code="मर">Marathi (मराठी)</div>
+              <div class="lang-option" data-lang="ta" data-code="த">Tamil (தமிழ்)</div>
+              <div class="lang-option" data-lang="gu" data-code="ગુ">Gujarati (ગુજરાતી)</div>
+              <div class="lang-option" data-lang="kn" data-code="ಕ">Kannada (ಕನ್ನಡ)</div>
+              <div class="lang-option" data-lang="ml" data-code="മ">Malayalam (മലയാളം)</div>
+              <div class="lang-option" data-lang="pa" data-code="ਪੰ">Punjabi (ਪੰਜਾਬੀ)</div>
+              <div class="lang-option" data-lang="or" data-code="ଓ">Odia (ଓଡ଼ିଆ)</div>
+              <div class="lang-option" data-lang="ur" data-code="اردو">Urdu (اردو)</div>
+              <div class="lang-option" data-lang="as" data-code="অ">Assamese (অসমীয়া)</div>
+            </div>
+          </div>
 
           <!-- mail icon -->
           <button class="icon-btn" aria-label="Messages" title="Messages">
@@ -56,31 +76,31 @@
     <aside class="sidebar">
       <div class="sidebar-top">
         <nav class="menu" aria-label="Main menu">
-          <button id="newChatBtn" class="menu-item new-chat-btn">＋ New Chat</button>
+          <button id="newChatBtn" class="menu-item new-chat-btn"><span data-i18n="nav.newChat">＋ New Chat</span></button>
 
           <a class="menu-item active" href="dashboard.html">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
-            <span>Dashboard</span>
+            <span data-i18n="nav.dashboard">Dashboard</span>
           </a>
 
           <a class="menu-item" href="#">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5A6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 20.5L21.5 19l-6-5z" fill="currentColor"/></svg>
-            <span>Search Chats</span>
+            <span data-i18n="nav.searchChats">Search Chats</span>
           </a>
 
           <a class="menu-item" href="#">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M4 6h16v12H4z M6 8v8h12V8z" fill="currentColor"/></svg>
-            <span>Library</span>
+            <span data-i18n="nav.library">Library</span>
           </a>
         </nav>
       </div>
 
       <div class="chats">
-        <h4>Recent Chats</h4>
+        <h4 data-i18n="nav.recentChats">Recent Chats</h4>
         <ul id="chatList">
-          <li class="chat-item"><div><h5>IC Check — Texas Instruments</h5></div><div class="time">Today</div></li>
-          <li class="chat-item"><div><h5>IC Check — STMicroelectronics</h5></div><div class="time">Yesterday</div></li>
-          <li class="chat-item"><div><h5>IC Check — Analog Devices</h5></div><div class="time">2d</div></li>
+          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — Texas Instruments</h5></div><div class="time" data-i18n="dashboard.today">Today</div></li>
+          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — STMicroelectronics</h5></div><div class="time" data-i18n="dashboard.yesterday">Yesterday</div></li>
+          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — Analog Devices</h5></div><div class="time"><span data-i18n="dashboard.daysAgo">2d</span></div></li>
         </ul>
       </div>
 
@@ -95,7 +115,7 @@
       <!-- SEARCH ROW (now left-aligned, below top nav and to the right of the sidebar) -->
       <div class="search-row">
         <div class="search-container">
-          <input type="search" placeholder="Search tasks, chips, serials..." />
+          <input type="search" data-i18n-placeholder="dashboard.searchPlaceholder" placeholder="Search tasks, chips, serials..." />
         </div>
       </div>
 
@@ -103,24 +123,24 @@
         <!-- Hello card spans columns 1..2 -->
         <div class="card welcome wide">
           <div>
-            <h2>Hello, Priya 👋</h2>
-            <p class="muted">You have <strong>3</strong> pending verifications today. Keep your supply chain safe.</p>
+            <h2 data-i18n="dashboard.welcome">Hello, Priya</h2>
+            <p class="muted" data-i18n="dashboard.pending">You have <strong>3</strong> pending verifications today. Keep your supply chain safe.</p>
           </div>
           <div class="illustration" aria-hidden>
             <svg width="140" height="110" viewBox="0 0 140 110" aria-hidden>
               <rect x="0" y="0" width="140" height="110" rx="12" fill="#f3f4f6"></rect>
-              <text x="14" y="60" fill="#9aa4b2" font-size="12">IC Inspector</text>
+              <text x="14" y="60" fill="#9aa4b2" font-size="12" data-i18n="dashboard.icInspector">IC Inspector</text>
             </svg>
           </div>
         </div>
 
         <!-- Performance overview: spans same two columns and is longer, bars are thinner -->
         <div class="card performance wide">
-          <h3>Performance overview</h3>
+          <h3 data-i18n="dashboard.performance">Performance overview</h3>
 
           <div class="bars">
             <div class="bar-row">
-              <div class="label">Auto-detect accuracy</div>
+              <div class="label" data-i18n="dashboard.autoDetect">Auto-detect accuracy</div>
               <div class="bar">
                 <div class="bar-fill" style="width:86%"></div>
                 <div class="bar-value">86%</div>
@@ -128,7 +148,7 @@
             </div>
 
             <div class="bar-row">
-              <div class="label">Manual verification rate</div>
+              <div class="label" data-i18n="dashboard.manualVerify">Manual verification rate</div>
               <div class="bar">
                 <div class="bar-fill" style="width:72%"></div>
                 <div class="bar-value">72%</div>
@@ -136,7 +156,7 @@
             </div>
 
             <div class="bar-row">
-              <div class="label">False positive rate</div>
+              <div class="label" data-i18n="dashboard.falsePositive">False positive rate</div>
               <div class="bar">
                 <div class="bar-fill negative" style="width:14%"></div>
                 <div class="bar-value">14%</div>
@@ -144,7 +164,7 @@
             </div>
 
             <div class="bar-row">
-              <div class="label">Avg response time</div>
+              <div class="label" data-i18n="dashboard.avgResponse">Avg response time</div>
               <div class="bar">
                 <div class="bar-fill" style="width:62%"></div>
                 <div class="bar-value">62%</div>
@@ -156,7 +176,7 @@
         <!-- Right column: KPIs + tasks (aligned top with the two wide cards) -->
         <div class="column-right">
           <div class="card circles">
-            <h4>Key KPIs</h4>
+            <h4 data-i18n="dashboard.keyKPIs">Key KPIs</h4>
             <div class="kpis">
               <div class="kpi">
                 <svg viewBox="0 0 36 36" class="circular-chart">
@@ -164,7 +184,7 @@
                   <path class="circle" stroke-dasharray="92,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text">92%</text>
                 </svg>
-                <div class="kpi-label">Visual match</div>
+                <div class="kpi-label" data-i18n="dashboard.visualMatch">Visual match</div>
               </div>
 
               <div class="kpi">
@@ -173,7 +193,7 @@
                   <path class="circle" stroke-dasharray="81,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text">81%</text>
                 </svg>
-                <div class="kpi-label">Metadata match</div>
+                <div class="kpi-label" data-i18n="dashboard.metadataMatch">Metadata match</div>
               </div>
 
               <div class="kpi">
@@ -182,25 +202,25 @@
                   <path class="circle" stroke-dasharray="76,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text">76%</text>
                 </svg>
-                <div class="kpi-label">Confidence</div>
+                <div class="kpi-label" data-i18n="dashboard.confidence">Confidence</div>
               </div>
             </div>
           </div>
 
           <div class="card calendar">
-            <h4>Upcoming tasks</h4>
+            <h4 data-i18n="dashboard.upcomingTasks">Upcoming tasks</h4>
             <ul class="events">
               <li>
                 <div class="time">10:30</div>
-                <div class="details"><strong>Inspect Lot #TI-2547</strong><div class="small muted">Supplier: Texas Instruments</div></div>
+                <div class="details"><strong data-i18n="dashboard.task.inspectLot">Inspect Lot</strong> #TI-2547<div class="small muted"><span data-i18n="dashboard.task.supplier">Supplier</span>: Texas Instruments</div></div>
               </li>
               <li>
                 <div class="time">13:00</div>
-                <div class="details"><strong>Verify NXP MCU batch</strong><div class="small muted">Lab test pending</div></div>
+                <div class="details"><strong data-i18n="dashboard.task.verifyBatch">Verify NXP MCU batch</strong><div class="small muted" data-i18n="dashboard.task.labTestPending">Lab test pending</div></div>
               </li>
               <li>
                 <div class="time">15:45</div>
-                <div class="details"><strong>Batch audit: Infineon ICs</strong><div class="small muted">Urgent</div></div>
+                <div class="details"><strong data-i18n="dashboard.task.batchAudit">Batch audit: Infineon ICs</strong><div class="small muted" data-i18n="dashboard.task.urgent">Urgent</div></div>
               </li>
             </ul>
           </div>
@@ -208,13 +228,13 @@
 
         <!-- bottom: linked contacts full-width -->
         <div class="card fullwidth contacts">
-          <h4>Linked contacts</h4>
+          <h4 data-i18n="dashboard.linkedContacts">Linked contacts</h4>
           <div class="contact-list">
             <div class="contact">
               <div class="avatar">AS</div>
               <div>
                 <div class="name">Aarav Sharma</div>
-                <div class="small muted">Quality Manager • aarav.sharma@ti.com</div>
+                <div class="small muted"><span data-i18n="dashboard.contact.qualityManager">Quality Manager</span> • aarav.sharma@ti.com</div>
               </div>
               <div class="contact-actions">
                 <button class="icon-btn">✉️</button>
@@ -226,7 +246,7 @@
               <div class="avatar">RP</div>
               <div>
                 <div class="name">Riya Patel</div>
-                <div class="small muted">Supplier Liaison • riya.patel@microchip.com</div>
+                <div class="small muted"><span data-i18n="dashboard.contact.supplierLiaison">Supplier Liaison</span> • riya.patel@microchip.com</div>
               </div>
               <div class="contact-actions">
                 <button class="icon-btn">✉️</button>
@@ -240,6 +260,14 @@
     </main>
   </div>
 
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase Config -->
+  <script src="js/supabase-config.js"></script>
+  <!-- Static Translations -->
+  <script src="js/translations.js"></script>
+  <!-- Translation API (uses static + API fallback) -->
+  <script src="js/translate-api.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

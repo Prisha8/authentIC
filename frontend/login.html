@@ -14,22 +14,45 @@
       <img src="assets/logo.png" alt="authentIC logo" style="width:28px;height:28px;" />
       <span>authentIC</span>
     </a>
+    <div class="nav-right" style="display:flex;align-items:center;gap:12px;">
+      <div class="lang-dropdown">
+        <button class="lang-btn" id="langBtn" aria-label="Select Language">
+          <span id="langDisplay">ENG</span>
+          <span class="lang-arrow">▾</span>
+        </button>
+        <div class="lang-menu" id="langMenu">
+          <div class="lang-option" data-lang="en" data-code="ENG">English</div>
+          <div class="lang-option" data-lang="hi" data-code="हिं">Hindi (हिंदी)</div>
+          <div class="lang-option" data-lang="bn" data-code="বাং">Bengali (বাংলা)</div>
+          <div class="lang-option" data-lang="te" data-code="తె">Telugu (తెలుగు)</div>
+          <div class="lang-option" data-lang="mr" data-code="मर">Marathi (मराठी)</div>
+          <div class="lang-option" data-lang="ta" data-code="த">Tamil (தமிழ்)</div>
+          <div class="lang-option" data-lang="gu" data-code="ગુ">Gujarati (ગુજરાતી)</div>
+          <div class="lang-option" data-lang="kn" data-code="ಕ">Kannada (ಕನ್ನಡ)</div>
+          <div class="lang-option" data-lang="ml" data-code="മ">Malayalam (മലയാളം)</div>
+          <div class="lang-option" data-lang="pa" data-code="ਪੰ">Punjabi (ਪੰਜਾਬੀ)</div>
+          <div class="lang-option" data-lang="or" data-code="ଓ">Odia (ଓଡ଼ିଆ)</div>
+          <div class="lang-option" data-lang="ur" data-code="اردو">Urdu (اردو)</div>
+          <div class="lang-option" data-lang="as" data-code="অ">Assamese (অসমীয়া)</div>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main class="login-container">
     <div class="login-box">
-      <h1>Login to Continue</h1>
-      <p class="subtitle">Select your login type</p>
+      <h1 data-i18n="login.title">Login to Continue</h1>
+      <p class="subtitle" data-i18n="login.subtitle">Select your login type</p>
 
       <div class="login-options">
         <a href="personal_login.html" class="login-card">
-          <h2>Personal Login</h2>
-          <p>Access your personal IC authenticity checks and reports.</p>
+          <h2 data-i18n="login.personal">Personal Login</h2>
+          <p data-i18n="login.personalDesc">Access your personal IC authenticity checks and reports.</p>
         </a>
 
         <a href="business_login.html" class="login-card">
-          <h2>Business Login</h2>
-          <p>Manage large-scale counterfeit detection across your supply chain.</p>
+          <h2 data-i18n="login.business">Business Login</h2>
+          <p data-i18n="login.businessDesc">Manage large-scale counterfeit detection across your supply chain.</p>
         </a>
       </div>
     </div>
@@ -37,8 +60,8 @@
     <!-- PERFORMANCE HIGHLIGHTS (copied from homepage) -->
     <section id="performance" class="performance-highlights">
       <div class="container">
-        <h2>Performance Highlights</h2>
-        <p class="lead">Key platform metrics — accuracy, speed and scale you can rely on.</p>
+        <h2 data-i18n="home.performance.title">Performance Highlights</h2>
+        <p class="lead" data-i18n="home.performance.lead">Key platform metrics — accuracy, speed and scale you can rely on.</p>
 
         <div class="metric-grid">
           <!-- Donut: Visual match (static 92%) -->
@@ -51,8 +74,8 @@
               </svg>
             </div>
             <div class="metric-body">
-              <div class="metric-title">Visual match</div>
-              <div class="metric-sub">AI visual comparison vs known-good samples</div>
+              <div class="metric-title" data-i18n="home.performance.visualMatch">Visual match</div>
+              <div class="metric-sub" data-i18n="home.performance.visualMatchDesc">AI visual comparison vs known-good samples</div>
             </div>
           </div>
 
@@ -65,8 +88,8 @@
               <div class="meter-label"><span class="meter-value">1.2</span>s</div>
             </div>
             <div class="metric-body">
-              <div class="metric-title">Avg detection time</div>
-              <div class="metric-sub">Average time from upload to result</div>
+              <div class="metric-title" data-i18n="home.performance.avgTime">Avg detection time</div>
+              <div class="metric-sub" data-i18n="home.performance.avgTimeDesc">Average time from upload to result</div>
             </div>
           </div>
 
@@ -80,8 +103,8 @@
             </div>
 
             <div class="metric-body stat-body">
-              <div class="metric-title">ICs verified</div>
-              <div class="metric-sub">Verified against our curated database</div>
+              <div class="metric-title" data-i18n="home.performance.icsVerified">ICs verified</div>
+              <div class="metric-sub" data-i18n="home.performance.icsVerifiedDesc">Verified against our curated database</div>
             </div>
           </div>
         </div>
@@ -91,7 +114,7 @@
     <!-- KEY FEATURES (copied from homepage) -->
     <section id="features" class="features">
       <div class="container">
-        <h2>Key features</h2>
+        <h2 data-i18n="home.features.title">Key features</h2>
 
         <div class="features-grid" role="list">
           <!-- Live confidence scoring -->
@@ -103,8 +126,8 @@
                 <circle cx="12" cy="12" r="1" fill="currentColor"/>
               </svg>
             </div>
-            <h3 class="feature-title">Live confidence scoring</h3>
-            <p class="feature-desc">Per-sample confidence shown instantly so you can prioritise reviews.</p>
+            <h3 class="feature-title" data-i18n="home.features.confidence">Live confidence scoring</h3>
+            <p class="feature-desc" data-i18n="home.features.confidenceDesc">Per-sample confidence shown instantly so you can prioritise reviews.</p>
           </article>
 
           <!-- AI marking analysis -->
@@ -115,8 +138,8 @@
                 <circle cx="7.5" cy="8.5" r="1.2" fill="currentColor"/>
               </svg>
             </div>
-            <h3 class="feature-title">AI marking analysis</h3>
-            <p class="feature-desc">Automatic inspection of package markings, fonts and logos to flag anomalies.</p>
+            <h3 class="feature-title" data-i18n="home.features.marking">AI marking analysis</h3>
+            <p class="feature-desc" data-i18n="home.features.markingDesc">Automatic inspection of package markings, fonts and logos to flag anomalies.</p>
           </article>
 
           <!-- Batch audit mode -->
@@ -128,8 +151,8 @@
                 <rect x="3" y="17" width="18" height="5" rx="1.2" stroke-linejoin="round"/>
               </svg>
             </div>
-            <h3 class="feature-title">Batch audit mode</h3>
-            <p class="feature-desc">Process entire lots in one run—export reports and mark suspicious batches.</p>
+            <h3 class="feature-title" data-i18n="home.features.batch">Batch audit mode</h3>
+            <p class="feature-desc" data-i18n="home.features.batchDesc">Process entire lots in one run—export reports and mark suspicious batches.</p>
           </article>
 
           <!-- Secure cloud storage -->
@@ -141,8 +164,8 @@
                 <path d="M11 14v-1a1 1 0 1 1 2 0v1" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <h3 class="feature-title">Secure cloud storage</h3>
-            <p class="feature-desc">Encrypted uploads and role-based access keep your IP and reports safe.</p>
+            <h3 class="feature-title" data-i18n="home.features.storage">Secure cloud storage</h3>
+            <p class="feature-desc" data-i18n="home.features.storageDesc">Encrypted uploads and role-based access keep your IP and reports safe.</p>
           </article>
         </div>
       </div>
@@ -152,13 +175,108 @@
   <footer class="site-footer" role="contentinfo">
     <div class="footer-inner">
       <div class="footer-col about">
-        <h4>About us</h4>
-        <p>
+        <h4 data-i18n="home.about.title">About us</h4>
+        <p data-i18n="home.about.text">
           authentIC uses AI-driven visual and metadata analysis to identify counterfeit integrated circuits
           quickly and reliably — protecting manufacturers and supply chains with fast, secure verification.
         </p>
       </div>
     </div>
   </footer>
+  <script src="js/translations.js"></script>
+  <script src="js/translate-api.js"></script>
+  <script>
+    // Setup language dropdown for login page
+    function setupLanguageDropdown() {
+      const langBtn = document.getElementById('langBtn');
+      const langMenu = document.getElementById('langMenu');
+      const langDisplay = document.getElementById('langDisplay');
+      
+      if (!langBtn || !langMenu || !langDisplay) {
+        console.log('Language dropdown elements not found');
+        return;
+      }
+      
+      // Load saved language preference (default to English)
+      const savedLang = localStorage.getItem('authentIC_language') || 'en';
+      const savedLangOption = document.querySelector(`.lang-option[data-lang="${savedLang}"]`);
+      if (savedLangOption) {
+        langDisplay.textContent = savedLangOption.dataset.code;
+        document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+        savedLangOption.classList.add('active');
+        // Translate page if function is available and language is not English
+        if (savedLang !== 'en') {
+          setTimeout(async () => {
+            if (typeof window.translatePage === 'function') {
+              await window.translatePage(savedLang).catch(err => {
+                console.error('Translation error:', err);
+              });
+            }
+          }, 100);
+        }
+      }
+
+      // Toggle dropdown
+      langBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isShowing = langMenu.classList.contains('show');
+        
+        // Close all other dropdowns first (if any)
+        document.querySelectorAll('.lang-menu').forEach(menu => {
+          if (menu !== langMenu) menu.classList.remove('show');
+        });
+        
+        // Toggle this menu
+        langMenu.classList.toggle('show');
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!langBtn.contains(e.target) && !langMenu.contains(e.target)) {
+          langMenu.classList.remove('show');
+        }
+      });
+
+      // Handle language selection
+      document.querySelectorAll('.lang-option').forEach(option => {
+        option.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const lang = option.dataset.lang;
+          const code = option.dataset.code;
+          
+          // Update display
+          langDisplay.textContent = code;
+          
+          // Update active state
+          document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+          option.classList.add('active');
+          
+          // Save preference
+          localStorage.setItem('authentIC_language', lang);
+          
+          // Close dropdown
+          langMenu.classList.remove('show');
+          
+          // Translate the page immediately
+          if (typeof window.translatePage === 'function') {
+            window.translatePage(lang).catch(err => {
+              console.error('Translation error:', err);
+            });
+          } else {
+            console.error('translatePage function not found');
+            document.documentElement.lang = lang;
+          }
+        });
+      });
+    }
+
+    // Initialize on page load
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupLanguageDropdown);
+    } else {
+      setupLanguageDropdown();
+    }
+  </script>
 </body>
 </html>

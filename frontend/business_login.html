@@ -14,52 +14,143 @@
       <img src="assets/logo.png" alt="authentIC logo" style="width:28px;height:28px;" />
       <span>authentIC</span>
     </a>
-    <nav class="nav-right">
-      <a href="login.html">Back</a>
+    <nav class="nav-right" style="display:flex;align-items:center;gap:12px;">
+      <div class="lang-dropdown">
+        <button class="lang-btn" id="langBtn" aria-label="Select Language">
+          <span id="langDisplay">ENG</span>
+          <span class="lang-arrow">▾</span>
+        </button>
+        <div class="lang-menu" id="langMenu">
+          <div class="lang-option" data-lang="en" data-code="ENG">English</div>
+          <div class="lang-option" data-lang="hi" data-code="हिं">Hindi (हिंदी)</div>
+          <div class="lang-option" data-lang="bn" data-code="বাং">Bengali (বাংলা)</div>
+          <div class="lang-option" data-lang="te" data-code="తె">Telugu (తెలుగు)</div>
+          <div class="lang-option" data-lang="mr" data-code="मर">Marathi (मराठी)</div>
+          <div class="lang-option" data-lang="ta" data-code="த">Tamil (தமிழ்)</div>
+          <div class="lang-option" data-lang="gu" data-code="ગુ">Gujarati (ગુજરાતી)</div>
+          <div class="lang-option" data-lang="kn" data-code="ಕ">Kannada (ಕನ್ನಡ)</div>
+          <div class="lang-option" data-lang="ml" data-code="മ">Malayalam (മലയാളം)</div>
+          <div class="lang-option" data-lang="pa" data-code="ਪੰ">Punjabi (ਪੰਜਾਬੀ)</div>
+          <div class="lang-option" data-lang="or" data-code="ଓ">Odia (ଓଡ଼ିଆ)</div>
+          <div class="lang-option" data-lang="ur" data-code="اردو">Urdu (اردو)</div>
+          <div class="lang-option" data-lang="as" data-code="অ">Assamese (অসমীয়া)</div>
+        </div>
+      </div>
+      <a href="login.html" data-i18n="common.back">Back</a>
     </nav>
   </header>
 
   <main class="login-container">
     <div class="login-box form-box">
-      <h1>Business Login</h1>
-      <p class="subtitle">Sign in to manage company reports & team access</p>
+      <h1 data-i18n="login.business.title">Business Login</h1>
+      <p class="subtitle" data-i18n="login.business.subtitle">Sign in to manage company reports & team access</p>
 
       <form id="businessForm" class="auth-form" autocomplete="on">
         <label class="form-label">
-          Company Email
+          <span data-i18n="login.business.email">Company Email</span>
           <input id="bEmail" name="email" type="email" required placeholder="admin@company.com" />
         </label>
 
         <label class="form-label">
-          Company ID
+          <span data-i18n="login.business.companyId">Company ID</span>
           <input id="companyId" name="companyId" type="text" required placeholder="Company ID or Org Name" />
         </label>
 
         <label class="form-label">
-          Password
+          <span data-i18n="login.business.password">Password</span>
           <input id="bPassword" name="password" type="password" required minlength="6" placeholder="Enter your password" />
         </label>
 
-        <button type="submit" class="btn-primary">Login</button>
+        <button type="submit" class="btn-primary" data-i18n="login.business.button">Login</button>
 
         <div class="separator"><span>or</span></div>
 
         <button id="bGoogle" type="button" class="btn-google">
-          <!-- same google icon -->
+          <!-- Google logo -->
           <svg width="18" height="18" viewBox="0 0 24 24" style="margin-right:10px" aria-hidden>
-            <path fill="#EA4335" d="M12 11.2v2.9h4.6c-.2 1.2-.9 2.2-1.9 2.9v2.4h3.1c1.8-1.6 2.8-4.2 2.8-7.2 0-.6-.1-1.2-.2-1.8H12z"/>
-            <path fill="#34A853" d="M6.9 14.1c-.5-1- .5-2.2 0-3.2V8.5H3.8C3 9.9 2.6 11.6 3 13.4c.4 1.8 1.6 3.3 3 4.3l1. -3.6z"/>
-            <path fill="#4A90E2" d="M12 6.6c1 0 1.8.3 2.5.8l1.8-1.8C15.9 4.9 14.1 4 12 4 8.9 4 6.3 5.9 4.8 8.8l2.8 2.2C8.4 10.1 10.1 8.6 12 8.6z"/>
-            <path fill="#FBBC05" d="M4.8 8.8L3 11c1.2-2.6 3.9-4.4 6.9-4.4 1.7 0 3.2.6 4.3 1.6l-1.8 1.8C11.9 9.2 10 8.6 8 8.6 6.7 8.6 5.4 8.9 4.8 8.8z"/>
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
           </svg>
-          Login with Google
+          <span data-i18n="login.business.google">Login with Google</span>
         </button>
 
-        <p class="muted small">Need assistance? <a href="mailto:support@example.com">Contact support</a></p>
+        <p class="muted small"><span data-i18n="login.business.signup">Don't have an account?</span> <a href="#" id="bSignupLink" data-i18n="login.business.signupLink">Sign up</a> or <a href="mailto:support@example.com">Contact support</a></p>
       </form>
     </div>
   </main>
 
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase Config -->
+  <script src="js/supabase-config.js"></script>
+  <!-- Static Translations -->
+  <script src="js/translations.js"></script>
+  <!-- Translation API (uses static + API fallback) -->
+  <script src="js/translate-api.js"></script>
   <script src="js/login.js"></script>
+  <script>
+    // Setup language dropdown for login page
+    function setupLanguageDropdown() {
+      const langBtn = document.getElementById('langBtn');
+      const langMenu = document.getElementById('langMenu');
+      const langDisplay = document.getElementById('langDisplay');
+      
+      if (!langBtn || !langMenu || !langDisplay) return;
+      
+      const savedLang = localStorage.getItem('authentIC_language') || 'en';
+      const savedLangOption = document.querySelector(`.lang-option[data-lang="${savedLang}"]`);
+      if (savedLangOption) {
+        langDisplay.textContent = savedLangOption.dataset.code;
+        document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+        savedLangOption.classList.add('active');
+        if (savedLang !== 'en') {
+          setTimeout(() => {
+            if (typeof window.translatePage === 'function') {
+              window.translatePage(savedLang);
+            }
+          }, 100);
+        }
+      }
+
+      langBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        document.querySelectorAll('.lang-menu').forEach(menu => {
+          if (menu !== langMenu) menu.classList.remove('show');
+        });
+        langMenu.classList.toggle('show');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!langBtn.contains(e.target) && !langMenu.contains(e.target)) {
+          langMenu.classList.remove('show');
+        }
+      });
+
+      document.querySelectorAll('.lang-option').forEach(option => {
+        option.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const lang = option.dataset.lang;
+          const code = option.dataset.code;
+          langDisplay.textContent = code;
+          document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+          option.classList.add('active');
+          localStorage.setItem('authentIC_language', lang);
+          langMenu.classList.remove('show');
+          if (typeof window.translatePage === 'function') {
+            window.translatePage(lang);
+          }
+        });
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupLanguageDropdown);
+    } else {
+      setupLanguageDropdown();
+    }
+  </script>
 </body>
 </html>

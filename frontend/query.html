@@ -27,6 +27,13 @@
         </a>
       </div>
       <div class="nav-right">
+        <!-- Dark Mode Toggle -->
+        <button class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" aria-label="Toggle dark mode" style="margin-right:10px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+        </button>
+        
         <button class="profile-btn">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -133,6 +140,8 @@
   <script src="js/translations.js"></script>
   <!-- Translation API (uses static + API fallback) -->
   <script src="js/translate-api.js"></script>
+  <!-- Dark Mode -->
+  <script src="js/dark-mode.js"></script>
   <script src="js/chat.js"></script>
 </body>
 

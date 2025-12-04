@@ -12,8 +12,22 @@
   --ring: #18181b;
 }
 
+/* Dark mode variables */
+.dark-mode {
+  --bg: #0f1724;
+  --panel: #1e293b;
+  --border: #334155;
+  --muted: #94a3b8;
+  --accent: #76b900;
+  --accent-foreground: #0f1724;
+  --text: #f1f5f9;
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --ring: #76b900;
+}
+
 *{box-sizing:border-box}
-body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;background:var(--bg);color:var(--text)}
+body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;background:var(--bg);color:var(--text);transition:background 0.2s, color 0.2s;}
+body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
 .app-shell{display:flex;height:100vh;overflow:hidden}
 
 /* SIDEBAR */
@@ -41,7 +55,7 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 
 /* Hover effect to match shadcn */
 .new-chat-btn:hover {
-  background: #f4f4f5;
+  background: var(--bg);
 }
 
 /* Align it with other menu buttons */
@@ -65,7 +79,7 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 }
 
 .menu-item:hover {
-  background: #f4f4f5;
+  background: var(--bg);
 }
 
 .menu-item.active {
@@ -81,7 +95,7 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 .chats h4{color:var(--muted);font-size:0.9rem;margin:8px 0 6px;font-weight:500}
 #chatList{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
 .chat-item{display:flex;align-items:center;justify-content:space-between;padding:10px;border-radius:var(--radius);background:transparent;border:1px solid transparent;cursor:pointer;transition:background 0.2s,border-color 0.2s}
-.chat-item:hover{background:#f4f4f5;border-color:var(--border)}
+.chat-item:hover{background:var(--bg);border-color:var(--border)}
 .chat-item.active{background:var(--accent);border-color:var(--accent);color:var(--accent-foreground)}
 .chat-item.active h5,.chat-item.active .time{color:var(--accent-foreground)}
 .chat-item h5{margin:0;font-size:0.95rem;font-weight:500}
@@ -100,7 +114,7 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 .empty-state{color:var(--muted);display:flex;align-items:center;justify-content:center;height:100%;padding:40px}
 
 /* message bubbles (shadcn-inspired) */
-.msg{max-width:75%;padding:12px 16px;border-radius:var(--radius);background:#f4f4f5;color:var(--text);box-shadow:var(--shadow);line-height:1.5}
+.msg{max-width:75%;padding:12px 16px;border-radius:var(--radius);background:var(--bg);color:var(--text);box-shadow:var(--shadow);line-height:1.5}
 .msg.user{align-self:flex-end;background:var(--accent);color:var(--accent-foreground);font-weight:500;margin-left:auto}
 .msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--border);color:var(--text);margin-right:auto}
 .msg img{max-width:280px;width:100%;height:auto;border-radius:6px;margin-bottom:8px;display:block}
@@ -111,7 +125,7 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 .thinking-steps .step:not(:last-child){margin-bottom:4px}
 .thinking-steps .step:not(:last-child)::before{content:'';position:absolute;left:7px;top:28px;width:2px;height:calc(100% + 4px);background:var(--border);z-index:0}
 .thinking-steps .step.active{color:var(--text);font-weight:500}
-.thinking-steps .step.completed{color:#71717a}
+.thinking-steps .step.completed{color:var(--muted)}
 .thinking-steps .step.completed:not(:last-child)::before{background:var(--accent)}
 .thinking-steps .step-icon{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;background:var(--panel);position:relative;z-index:1;margin-top:2px}
 .thinking-steps .step.active .step-icon{border-color:var(--accent);background:var(--panel);animation:subtlePulse 2.5s ease-in-out infinite}
@@ -131,16 +145,17 @@ body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe U
 .remove-preview:hover{opacity:0.8}
 
 textarea#prompt{width:100%;min-height:80px;padding:12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--panel);color:var(--text);resize:vertical;font-family:inherit;transition:border-color 0.2s}
-textarea#prompt:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 2px rgba(24,24,27,0.1)}
+textarea#prompt:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(118,185,0,0.1)}
+textarea#prompt::placeholder{color:var(--muted);}
 .composer-actions{display:flex;gap:10px;justify-content:flex-end;align-items:center}
 .file-label{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--border);cursor:pointer;color:var(--text);font-weight:500;transition:background 0.2s;margin-right:auto}
-.file-label:hover{background:#f4f4f5;border-color:var(--accent)}
+.file-label:hover{background:var(--bg);border-color:var(--accent)}
 .file-label input{display:none}
 .btn-send{background:var(--accent);color:var(--accent-foreground);border:none;padding:10px 20px;border-radius:var(--radius);cursor:pointer;font-weight:500;transition:opacity 0.2s;font-family:inherit}
 .btn-send:hover{opacity:0.9}
 .btn-send:disabled{opacity:0.5;cursor:not-allowed}
 .btn-secondary{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:var(--radius);cursor:pointer;font-weight:500;transition:background 0.2s;font-family:inherit}
-.btn-secondary:hover{background:#f4f4f5}
+.btn-secondary:hover{background:var(--bg)}
 
 /* responsive */
 @media (max-width: 1000px){
@@ -186,7 +201,7 @@ textarea#prompt:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 2px
 }
 
 .sidebar-toggle:hover {
-  background: #f4f4f5;
+  background: var(--bg);
 }
 
 .brand-link {
@@ -216,7 +231,7 @@ textarea#prompt:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 2px
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--border);
   padding: 6px 12px;
   border-radius: 8px;
@@ -228,7 +243,7 @@ textarea#prompt:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 2px
 }
 
 .profile-btn:hover {
-  background: #f3f4f6;
+  background: var(--bg);
 }
 
 .profile-btn img {

@@ -3,6 +3,23 @@
   --bg-dark: #0a0a0a;
   --text-dark: #111;
   --text-light: #f8f8f8;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --border: #e6e7ea;
+  --muted: #6b7280;
+  --text: #0f1724;
+}
+
+/* Dark mode variables */
+.dark-mode {
+  --bg: #0f1724;
+  --panel: #1e293b;
+  --border: #334155;
+  --muted: #94a3b8;
+  --text: #f1f5f9;
+  --bg-dark: #0a0a0a;
+  --text-dark: #f1f5f9;
+  --text-light: #f8f8f8;
 }
 
 * {
@@ -12,17 +29,24 @@
   font-family: 'Inter', sans-serif;
 }
 
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.2s, color 0.2s;
+}
+
 /* Navbar styling (matches homepage) */
 .navbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: white;
+  background: var(--panel);
   padding: 20px 60px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.05);
   position: sticky;
   top: 0;
   z-index: 10;
+  transition: background 0.2s;
 }
 .nav-left {
   font-size: 1.3rem;
@@ -51,30 +75,30 @@
   gap: 6px;
   padding: 6px 12px;
   background: transparent;
-  border: 1px solid #e6e7ea;
+  border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
-  color: var(--text-dark);
+  color: var(--text);
   transition: all 0.2s;
 }
 
 .lang-btn:hover {
-  background: #f3f4f6;
+  background: var(--bg);
   border-color: var(--accent);
 }
 
 .lang-arrow {
   font-size: 0.7rem;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .lang-menu {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  background: white;
-  border: 1px solid #e6e7ea;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   min-width: 200px;
@@ -92,7 +116,7 @@
 .lang-option {
   padding: 10px 16px;
   cursor: pointer;
-  color: var(--text-dark);
+  color: var(--text);
   font-size: 0.9rem;
   transition: background 0.15s;
   display: flex;
@@ -101,7 +125,34 @@
 }
 
 .lang-option:hover {
-  background: #f3f4f6;
+  background: var(--bg);
+}
+
+/* Dark Mode Toggle Button */
+.dark-mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+  transition: all 0.2s;
+}
+
+.dark-mode-toggle:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.dark-mode-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
 }
 
 .lang-option.active {
@@ -111,30 +162,34 @@
 
 /* Login main layout */
 .login-container {
-  background: linear-gradient(180deg, #ffffff 0%, #f3f4f6 100%);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
   min-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 40px;
   gap: 60px;
+  transition: background 0.2s;
 }
 
 .login-box {
-  background: white;
+  background: var(--panel);
   border-radius: 12px;
   padding: 60px 80px;
   max-width: 800px;
   text-align: center;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  box-shadow: var(--shadow);
   margin-top: 40px;
+  border: 1px solid var(--border);
+  transition: background 0.2s, border-color 0.2s;
 }
 
 /* Performance Highlights Section (from homepage) */
 .performance-highlights {
-  background: #fafafa;
+  background: var(--bg);
   padding: 80px 120px;
-  color: #111;
+  color: var(--text);
+  transition: background 0.2s, color 0.2s;
 }
 
 .performance-highlights .container {
@@ -145,11 +200,11 @@
 .performance-highlights h2 {
   font-size: 1.9rem;
   margin-bottom: 50px;
-  color: var(--text-dark);
+  color: var(--text);
 }
 
 .performance-highlights .lead {
-  color: #6b7280;
+  color: var(--muted);
   margin-bottom: 28px;
 }
 
@@ -162,16 +217,17 @@
 }
 
 .metric-card {
-  background: #fff;
+  background: var(--panel);
   border-radius: 12px;
   padding: 18px;
   display: flex;
   gap: 14px;
   align-items: center;
-  box-shadow: 0 8px 22px rgba(16,24,40,0.04);
+  box-shadow: var(--shadow);
   min-height: 150px;
   overflow: hidden;
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 0.2s;
+  border: 1px solid var(--border);
 }
 
 .metric-card:hover {
@@ -195,7 +251,7 @@
 
 .donut-bg {
   fill: none;
-  stroke: #f0f0f0;
+  stroke: var(--border);
   stroke-width: 4;
 }
 
@@ -209,7 +265,7 @@
 
 .donut-text {
   font-size: 10px;
-  fill: var(--text-dark);
+  fill: var(--text);
   text-anchor: middle;
   dominant-baseline: middle;
   transform: rotate(90deg);
@@ -229,10 +285,10 @@
   width: 100%;
   max-width: 220px;
   height: 14px;
-  background: #f1f1f1;
+  background: var(--bg);
   border-radius: 999px;
   overflow: hidden;
-  border: 1px solid #ececec;
+  border: 1px solid var(--border);
 }
 
 .meter-fill {
@@ -243,7 +299,7 @@
 .meter-label {
   font-size: 1.5rem;
   font-weight: 800;
-  color: var(--text-dark);
+  color: var(--text);
 }
 
 .meter-value {
@@ -306,7 +362,7 @@
   font-size: 1.9rem;
   margin-bottom: 28px;
   font-weight: 800;
-  color: var(--text-dark);
+  color: var(--text);
 }
 
 .features-grid {
@@ -400,12 +456,12 @@
 
 .login-box h1 {
   font-size: 2.2rem;
-  color: var(--text-dark);
+  color: var(--text);
   margin-bottom: 8px;
 }
 
 .subtitle {
-  color: #555;
+  color: var(--muted);
   font-size: 1rem;
   margin-bottom: 36px;
 }
@@ -420,10 +476,12 @@
 /* The clickable cards for Personal / Business */
 .login-card {
   display: block;
-  background: #f7f7f7;
+  background: var(--bg);
   border-radius: 10px;
   padding: 28px 32px;
   width: 300px;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
   text-decoration: none;
   color: var(--text-dark);
   border: 2px solid transparent;
@@ -434,11 +492,12 @@
   font-size: 1.4rem;
   font-weight: 700;
   margin-bottom: 10px;
+  color: var(--text);
 }
 
 .login-card p {
   font-size: 0.95rem;
-  color: #555;
+  color: var(--muted);
   line-height: 1.4;
 }
 
@@ -446,7 +505,7 @@
   border-color: var(--accent);
   box-shadow: 0 8px 24px rgba(118,185,0,0.15);
   transform: translateY(-4px);
-  background: white;
+  background: var(--panel);
 }
 
 /* Responsive */
@@ -505,16 +564,20 @@
 .auth-form { display: flex; flex-direction: column; gap: 12px; align-items: stretch; margin-top: 6px; }
 
 /* inputs */
-.form-label { display: flex; flex-direction: column; font-size: 0.95rem; color: #222; margin-bottom: 6px; }
+.form-label { display: flex; flex-direction: column; font-size: 0.95rem; color: var(--text); margin-bottom: 6px; }
 .form-label input {
   margin-top: 8px;
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid #e6e6e6;
+  border: 1px solid var(--border);
   font-size: 1rem;
   outline: none;
+  background: var(--panel);
+  color: var(--text);
+  transition: border-color 0.2s, background 0.2s;
 }
-.form-label input:focus { box-shadow: 0 6px 20px rgba(118,185,0,0.08); border-color: #bde084; }
+.form-label input::placeholder { color: var(--muted); }
+.form-label input:focus { box-shadow: 0 6px 20px rgba(118,185,0,0.08); border-color: var(--accent); }
 
 /* primary login button (green) */
 .btn-primary {
@@ -532,23 +595,24 @@
 .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(118,185,0,0.18); }
 
 /* separator */
-.separator { display:flex; align-items:center; gap:12px; margin:12px 0; color:#777; font-size:0.95rem; }
+.separator { display:flex; align-items:center; gap:12px; margin:12px 0; color:var(--muted); font-size:0.95rem; }
 .separator::before, .separator::after {
-  content: ""; height:1px; background:#eee; flex:1;
+  content: ""; height:1px; background:var(--border); flex:1;
 }
 
 /* Google button */
 .btn-google {
   display:flex; align-items:center; justify-content:center;
-  padding:10px 14px; border-radius:8px; border:1px solid #e6e6e6;
-  background: white; color:#222; font-weight:600; cursor:pointer;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  padding:10px 14px; border-radius:8px; border:1px solid var(--border);
+  background: var(--panel); color:var(--text); font-weight:600; cursor:pointer;
+  box-shadow: var(--shadow);
+  transition: all 0.2s;
 }
-.btn-google:hover { box-shadow: 0 10px 30px rgba(0,0,0,0.09); transform: translateY(-2px); }
+.btn-google:hover { box-shadow: 0 10px 30px rgba(0,0,0,0.09); transform: translateY(-2px); background: var(--bg); }
 
 /* small text */
-.small { font-size: 0.9rem; color:#666; margin-top:10px; }
-.muted a { color: #76b900; text-decoration: none; font-weight:600; }
+.small { font-size: 0.9rem; color:var(--muted); margin-top:10px; }
+.muted a { color: var(--accent); text-decoration: none; font-weight:600; }
 
 /* responsive */
 @media (max-width: 700px) {

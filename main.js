@@ -2,6 +2,9 @@ const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 require('dotenv').config();
 
+// Set app name (shown in dock tooltip and menus)
+app.setName('authentIC');
+
 let mainWindow;
 
 // Set app icon for macOS dock

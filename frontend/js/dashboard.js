@@ -139,13 +139,88 @@ function setupLanguageDropdown() {
   });
 }
 
+// Load chats from Supabase and render in sidebar
+async function loadAndRenderChats() {
+  console.log('[Dashboard] Loading chats for sidebar...');
+  const chatList = document.getElementById('chatList');
+  if (!chatList) {
+    console.error('[Dashboard] Chat list element not found!');
+    return;
+  }
+
+  try {
+    if (typeof window.chatService !== 'undefined') {
+      console.log('[Dashboard] ChatService available, fetching chats...');
+      const chatService = window.chatService;
+      const chats = await chatService.getUserChats();
+      console.log('[Dashboard] Received', chats.length, 'chats from Supabase');
+      
+      // Clear existing static chats
+      chatList.innerHTML = '';
+      
+      // Render chats dynamically
+      chats.forEach((chat, index) => {
+        console.log(`[Dashboard] Rendering chat ${index + 1}:`, chat.id, chat.title);
+        const li = document.createElement('li');
+        li.className = 'chat-item';
+        li.dataset.chatId = chat.id;
+        
+        // Format time
+        const timeDisplay = chatService.formatTime(chat.updated_at);
+        
+        // Extract IC name from title if possible (e.g., "IC Check — Texas Instruments")
+        const titleParts = chat.title.split(' — ');
+        const displayTitle = titleParts.length > 1 ? titleParts[1] : chat.title;
+        
+        li.innerHTML = `
+          <div><h5>IC Check — ${escapeHtml(displayTitle)}</h5></div>
+          <div class="time">${timeDisplay}</div>
+        `;
+        
+        // Click handler to navigate to chat
+        li.addEventListener('click', () => {
+          console.log('[Dashboard] User action: Clicked chat:', chat.id);
+          window.location.href = `query.html?chatId=${chat.id}`;
+        });
+        
+        chatList.appendChild(li);
+      });
+      
+      // Show message if no chats
+      if (chats.length === 0) {
+        console.log('[Dashboard] No chats found, showing empty state');
+        chatList.innerHTML = '<li class="chat-item" style="opacity:0.6;padding:12px;"><div>No chats yet. Start a new chat!</div></li>';
+      } else {
+        console.log('[Dashboard] Successfully rendered', chats.length, 'chats in sidebar');
+      }
+    } else {
+      console.warn('[Dashboard] ChatService not available');
+      console.warn('[Dashboard] Make sure chat-service.js is loaded before dashboard.js');
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error loading chats:', error);
+    console.error('[Dashboard] Error details:', error.message);
+    // Keep static chats as fallback
+  }
+}
+
+// Helper to escape HTML
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 // Wait for auth check before proceeding
 checkAuth().then((isAuthenticated) => {
   if (!isAuthenticated) return;
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     // Setup logout handler
     setupLogout();
+    
+    // Load and render chats from Supabase
+    await loadAndRenderChats();
     
     // animate bar fills (reads inline style width)
     document.querySelectorAll('.bar-fill').forEach((el) => {
@@ -157,12 +232,18 @@ checkAuth().then((isAuthenticated) => {
     // Handle new chat button navigation
     const newChatBtn = document.getElementById('newChatBtn');
     if (newChatBtn) {
+      console.log('[Dashboard] Setting up New Chat button handler');
       newChatBtn.addEventListener('click', function(e) {
+        console.log('[Dashboard] User action: New Chat button clicked');
         e.preventDefault();
         e.stopPropagation();
         // Add a parameter to indicate new chat request
+        console.log('[Dashboard] Navigating to query.html?new=true');
         window.location.href = 'query.html?new=true';
       }, true);
+      console.log('[Dashboard] New Chat button handler set up');
+    } else {
+      console.error('[Dashboard] New Chat button not found!');
     }
   });
 });

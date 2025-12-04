@@ -83,7 +83,12 @@
     <aside class="sidebar">
       <div class="sidebar-top">
         <nav class="menu" aria-label="Main menu">
-          <button id="newChatBtn" class="menu-item new-chat-btn"><span data-i18n="nav.newChat">＋ New Chat</span></button>
+          <button id="newChatBtn" class="menu-item new-chat-btn" onclick="window.location.href='query.html?new=true'; return false;" style="cursor: pointer;">
+            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            <span data-i18n="nav.newChat" style="pointer-events: none;">New Chat</span>
+          </button>
 
           <a class="menu-item active" href="dashboard.html">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
@@ -105,9 +110,7 @@
       <div class="chats">
         <h4 data-i18n="nav.recentChats">Recent Chats</h4>
         <ul id="chatList">
-          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — Texas Instruments</h5></div><div class="time" data-i18n="dashboard.today">Today</div></li>
-          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — STMicroelectronics</h5></div><div class="time" data-i18n="dashboard.yesterday">Yesterday</div></li>
-          <li class="chat-item"><div><h5><span data-i18n="dashboard.chat.icCheck">IC Check</span> — Analog Devices</h5></div><div class="time"><span data-i18n="dashboard.daysAgo">2d</span></div></li>
+          <!-- Chats will be loaded dynamically from Supabase -->
         </ul>
       </div>
 
@@ -271,6 +274,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Supabase Config -->
   <script src="js/supabase-config.js"></script>
+  <!-- Chat Service (Supabase operations) -->
+  <script src="js/chat-service.js"></script>
   <!-- Static Translations -->
   <script src="js/translations.js"></script>
   <!-- Translation API (uses static + API fallback) -->
@@ -278,5 +283,30 @@
   <!-- Dark Mode -->
   <script src="js/dark-mode.js"></script>
   <script src="js/dashboard.js"></script>
+  <script>
+    // Immediate test: Check if button works
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('newChatBtn');
+      console.log('[Dashboard Test] Button found:', !!btn);
+      console.log('[Dashboard Test] Button onclick:', btn?.onclick);
+      console.log('[Dashboard Test] Button element:', btn);
+      
+      // Test click after 2 seconds
+      setTimeout(() => {
+        if (btn) {
+          console.log('[Dashboard Test] Button is ready, onclick handler:', btn.onclick);
+          // Verify onclick is set
+          if (!btn.onclick) {
+            console.warn('[Dashboard Test] No onclick handler! Setting fallback...');
+            btn.onclick = function() {
+              console.log('[Dashboard Test] Fallback onclick triggered');
+              window.location.href = 'query.html?new=true';
+              return false;
+            };
+          }
+        }
+      }, 2000);
+    });
+  </script>
 </body>
 </html>

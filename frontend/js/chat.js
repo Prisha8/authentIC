@@ -24,9 +24,15 @@ async function checkAuth() {
 
 // Wait for auth check before proceeding
 checkAuth().then((isAuthenticated) => {
-  if (!isAuthenticated) return;
+  if (!isAuthenticated) {
+    console.log('[Chat] User not authenticated, skipping chat initialization');
+    return;
+  }
+
+  console.log('[Chat] User authenticated, initializing chat system...');
 
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('[Chat] DOM Content Loaded');
   // Elements
   const sidebar = document.getElementById('sidebar');
   const toggleSidebar = document.getElementById('toggleSidebar');
@@ -36,7 +42,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendBtn = document.getElementById('sendBtn');
   const promptEl = document.getElementById('prompt');
   const imgInput = document.getElementById('imgInput');
-  const saveChatBtn = document.getElementById('saveChatBtn');
+
+  // Debug: Check if button exists
+  console.log('[Chat] Button elements check:');
+  console.log('[Chat] - newChatBtn:', newChatBtn ? 'FOUND' : 'NOT FOUND');
+  console.log('[Chat] - chatList:', chatList ? 'FOUND' : 'NOT FOUND');
+  console.log('[Chat] - messagesEl:', messagesEl ? 'FOUND' : 'NOT FOUND');
+  
+  if (!newChatBtn) {
+    console.error('[Chat] CRITICAL: New Chat button not found in DOM!');
+    console.error('[Chat] Available buttons:', document.querySelectorAll('button').length);
+    console.error('[Chat] Button with id newChatBtn:', document.querySelector('#newChatBtn'));
+  }
 
   // Ensure menu-item titles are set for tooltip in collapsed mode
   document.querySelectorAll('.menu-item').forEach(mi => {
@@ -59,39 +76,186 @@ document.addEventListener('DOMContentLoaded', () => {
   let chats = [];
   let activeChatId = null;
   let attachedFile = null;
+  let chatService = null;
+
+  // Initialize chat service
+  console.log('[Chat] Initializing chat service...');
+  try {
+    if (typeof window.chatService !== 'undefined') {
+      chatService = window.chatService;
+      console.log('[Chat] ChatService initialized successfully');
+    } else {
+      console.warn('[Chat] ChatService not available, using local storage fallback');
+      console.warn('[Chat] Make sure chat-service.js is loaded before chat.js');
+    }
+  } catch (error) {
+    console.error('[Chat] Error initializing chat service:', error);
+  }
 
   // Helpers
   function formatTime(date = new Date()){
     return date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   }
 
-  function createChat(title){
+  async function createChat(title){
+    console.log('[Chat] User action: Creating new chat with title:', title);
+    const titleText = title || `Chat ${chats.length + 1}`;
+    
+    // If chatService is available, create chat in Supabase
+    if (chatService) {
+      console.log('[Chat] Using Supabase to create chat');
+      try {
+        const newChat = await chatService.createChat(titleText);
+        console.log('[Chat] Chat created in Supabase:', newChat);
+        
+        const chat = {
+          id: newChat.id,
+          title: newChat.title,
+          messages: [],
+          created_at: newChat.created_at,
+          updated_at: newChat.updated_at
+        };
+        chats.unshift(chat);
+        console.log('[Chat] Chat added to local array, total chats:', chats.length);
+        
+        // Immediately render the updated chat list
+        renderChatList();
+        console.log('[Chat] Chat list rendered after creation');
+        
+        // Set the new chat as active
+        await setActiveChat(chat.id);
+        renderMessages();
+        
+        console.log('[Chat] Chat creation completed successfully');
+        return chat;
+      } catch (error) {
+        console.error('[Chat] Error creating chat in Supabase:', error);
+        console.error('[Chat] Error details:', error.message, error);
+        alert('Failed to create chat: ' + (error.message || 'Unknown error'));
+        // Fallback to local storage
+      }
+    } else {
+      console.log('[Chat] ChatService not available, using local storage fallback');
+    }
+    
+    // Fallback: local storage
+    console.log('[Chat] Creating local chat (fallback)');
     const id = 'c' + Date.now();
-    const chat = { id, title: title || `Chat ${chats.length + 1}`, messages: [] };
+    const chat = { id, title: titleText, messages: [] };
     chats.unshift(chat);
     renderChatList();
     setActiveChat(chat.id);
-    // Clear the message area to show empty state
     renderMessages();
+    console.log('[Chat] Local chat created:', chat.id);
+    return chat;
   }
+  
+  // Make createChat available globally for inline handler
+  window.createChat = createChat;
 
   function renderChatList(){
-    if(!chatList) return;
+    // Re-find chatList element to ensure we have the latest reference
+    const currentChatList = document.getElementById('chatList');
+    if(!currentChatList) {
+      console.warn('[Chat] Chat list element not found, retrying...');
+      setTimeout(() => {
+        const retryList = document.getElementById('chatList');
+        if (retryList) {
+          chatList = retryList;
+          renderChatList();
+        }
+      }, 200);
+      return;
+    }
+    // Update reference
+    chatList = currentChatList;
+    
+    console.log('[Chat] Rendering chat list with', chats.length, 'chats');
     chatList.innerHTML = '';
-    chats.forEach(c => {
+    
+    if (chats.length === 0) {
+      console.log('[Chat] No chats to display');
+      return;
+    }
+    
+    chats.forEach((c, index) => {
       const li = document.createElement('li');
       li.className = 'chat-item' + (c.id === activeChatId ? ' active' : '');
       li.dataset.id = c.id;
-      li.innerHTML = `<div><h5>${escapeHtml(c.title)}</h5></div><div class="time">${c.messages.length ? formatTime(new Date(c.messages[c.messages.length-1].time)) : ''}</div>`;
-      li.addEventListener('click', ()=> setActiveChat(c.id));
+      
+      // Format time from updated_at or last message time
+      let timeDisplay = '';
+      if (c.updated_at) {
+        timeDisplay = chatService ? chatService.formatTime(c.updated_at) : formatTime(new Date(c.updated_at));
+      } else if (c.messages && c.messages.length > 0) {
+        timeDisplay = formatTime(new Date(c.messages[c.messages.length-1].time || c.messages[c.messages.length-1].created_at));
+      } else {
+        timeDisplay = 'Now';
+      }
+      
+      // Format title - extract IC name if possible
+      let displayTitle = c.title;
+      if (c.title.includes(' — ')) {
+        const parts = c.title.split(' — ');
+        displayTitle = parts.length > 1 ? parts[1] : c.title;
+      }
+      
+      li.innerHTML = `<div><h5>${escapeHtml(displayTitle)}</h5></div><div class="time">${timeDisplay}</div>`;
+      li.addEventListener('click', async () => {
+        console.log('[Chat] Chat clicked:', c.id);
+        await setActiveChat(c.id);
+      });
       chatList.appendChild(li);
+      console.log(`[Chat] Rendered chat ${index + 1}:`, c.id, c.title, 'Time:', timeDisplay);
     });
+    
+    const finalCount = chatList.children.length;
+    console.log('[Chat] Chat list rendering completed. Total items in DOM:', finalCount);
+    
+    if (finalCount !== chats.length) {
+      console.warn('[Chat] WARNING: Mismatch between chats array and rendered items!');
+      console.warn('[Chat] Chats array:', chats.length, 'Rendered:', finalCount);
+    }
   }
 
-  function setActiveChat(id){
+  async function setActiveChat(id){
+    console.log('[Chat] User action: Setting active chat to:', id);
     activeChatId = id;
     document.querySelectorAll('#chatList .chat-item').forEach(it => it.classList.toggle('active', it.dataset.id === id));
+    
+    // Load messages from Supabase if chatService is available
+    if (chatService) {
+      console.log('[Chat] Loading messages from Supabase for chat:', id);
+      try {
+        const messages = await chatService.getChatMessages(id);
+        console.log('[Chat] Loaded', messages.length, 'messages from Supabase');
+        
+        const chat = chats.find(c => c.id === id);
+        if (chat) {
+          // Convert Supabase messages to chat format
+          chat.messages = messages.map(msg => ({
+            role: msg.role,
+            text: msg.content,
+            img: msg.image_url,
+            time: new Date(msg.created_at).getTime(),
+            created_at: msg.created_at,
+            _thinking: msg.content === '' && msg.role === 'assistant', // Handle thinking messages
+            _hasReport: msg.content && msg.content.includes('**Final Report Prepared**')
+          }));
+          console.log('[Chat] Messages converted and stored in chat object');
+        } else {
+          console.warn('[Chat] Chat not found in local array:', id);
+        }
+      } catch (error) {
+        console.error('[Chat] Error loading messages:', error);
+        console.error('[Chat] Error details:', error.message);
+      }
+    } else {
+      console.log('[Chat] ChatService not available, using local messages');
+    }
+    
     renderMessages();
+    console.log('[Chat] Active chat set and messages rendered');
   }
 
   function renderMessages(){
@@ -192,16 +356,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 50);
   }
 
-  // new chat
-  if (newChatBtn) newChatBtn.addEventListener('click', ()=> {
-    // Navigate to query page if not already there
-    if (!window.location.pathname.includes('query.html')) {
-      window.location.href = 'query.html';
-    } else {
-      // If already on query page, create new chat
-      createChat('New Detection');
+  // new chat - Set up handler immediately
+  function setupNewChatButton() {
+    const btn = document.getElementById('newChatBtn');
+    if (!btn) {
+      console.error('[Chat] New Chat button not found! Retrying...');
+      // Retry after a short delay
+      setTimeout(setupNewChatButton, 100);
+      return;
     }
-  });
+    
+    console.log('[Chat] Setting up New Chat button handler');
+    console.log('[Chat] Button element:', btn);
+    console.log('[Chat] Button text:', btn.textContent);
+    
+    // Remove any existing listeners (if any)
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    
+    // Add event listener
+    newBtn.addEventListener('click', async (e) => {
+      console.log('[Chat] ====== NEW CHAT BUTTON CLICKED ======');
+      console.log('[Chat] Event:', e);
+      console.log('[Chat] Current URL:', window.location.href);
+      
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Navigate to query page if not already there
+      if (!window.location.pathname.includes('query.html')) {
+        console.log('[Chat] Navigating to query.html?new=true');
+        window.location.href = 'query.html?new=true';
+      } else {
+        // If already on query page, create new chat
+        console.log('[Chat] Already on query page, creating new chat');
+        try {
+          await createChat('New Detection');
+          console.log('[Chat] New chat created successfully');
+        } catch (error) {
+          console.error('[Chat] Failed to create new chat:', error);
+          console.error('[Chat] Error stack:', error.stack);
+          alert('Failed to create new chat: ' + (error.message || 'Unknown error'));
+        }
+      }
+    });
+    
+    console.log('[Chat] New Chat button handler set up successfully');
+    console.log('[Chat] Button clickable:', !newBtn.disabled);
+  }
+  
+  // Set up immediately
+  setupNewChatButton();
 
   // attach image with preview
   const imagePreview = document.getElementById('imagePreview');
@@ -252,20 +457,60 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
 
   // send/detect
-  function handleSend(){
+  async function handleSend(){
+  console.log('[Chat] User action: Send message clicked');
   const text = promptEl.value.trim();
+  console.log('[Chat] Message text:', text, 'Has file:', !!attachedFile);
+  
   if(!text && !attachedFile){
+    console.log('[Chat] Validation failed: No text or file');
     alert('Please write a prompt or attach an image.');
     return;
   }
+  
   // create a chat if none exists
-  if(!activeChatId) createChat('New Detection');
+  if(!activeChatId) {
+    console.log('[Chat] No active chat, creating new one');
+    await createChat('New Detection');
+  }
+  
   const chat = chats.find(c => c.id === activeChatId);
+  if (!chat) {
+    console.error('[Chat] Active chat not found!');
+    return;
+  }
+  
+  console.log('[Chat] Sending message to chat:', activeChatId);
 
   // build user message and attach image if present
   const userMsg = { role:'user', text: text || '(image only)', time: Date.now(), img: null };
-  if(attachedFile) userMsg.img = URL.createObjectURL(attachedFile);
+  let imageUrl = null;
+  
+  // Handle image upload to Supabase storage if available
+  if(attachedFile) {
+    // For now, use object URL. In production, upload to Supabase Storage
+    userMsg.img = URL.createObjectURL(attachedFile);
+    imageUrl = userMsg.img; // Store as base64 or upload to storage
+    
+    // TODO: Upload image to Supabase Storage and get URL
+    // const imageUrl = await uploadImageToSupabase(attachedFile);
+  }
+  
   chat.messages.push(userMsg);
+  
+  // Save message to Supabase
+  if (chatService) {
+    console.log('[Chat] Saving user message to Supabase');
+    try {
+      await chatService.saveMessage(activeChatId, 'user', userMsg.text, imageUrl);
+      console.log('[Chat] User message saved successfully');
+    } catch (error) {
+      console.error('[Chat] Error saving user message:', error);
+      console.error('[Chat] Error details:', error.message);
+    }
+  } else {
+    console.log('[Chat] ChatService not available, skipping Supabase save');
+  }
 
   // clear input and reset attach
   promptEl.value = '';
@@ -379,7 +624,17 @@ I identify this part as **SN74AHC04N** (TI logic inverter, 14-pin SOIC style). B
 
 I have generated a detailed report bundle including SR-enhanced marking crop, logo match overlay, pin index & pitch map, texture anomaly heatmap, extracted datasheet snippet, and summary verdict logs.`;
           
-          chat.messages.push({ role:'bot', text: result, time: Date.now(), _hasReport: true, _reportId: 'report_' + Date.now() });
+          const botMessage = { role:'bot', text: result, time: Date.now(), _hasReport: true, _reportId: 'report_' + Date.now() };
+          chat.messages.push(botMessage);
+
+          // Save bot message to Supabase
+          if (chatService) {
+            try {
+              await chatService.saveMessage(activeChatId, 'assistant', result, null);
+            } catch (error) {
+              console.error('Error saving bot message:', error);
+            }
+          }
 
           // Re-enable controls
       if(sendBtn) sendBtn.disabled = false;
@@ -405,16 +660,14 @@ I have generated a detailed report bundle including SR-enhanced marking crop, lo
     if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); handleSend(); }
   });
 
-  // save chat title
-  if(saveChatBtn) saveChatBtn.addEventListener('click', () => {
-    if(!activeChatId){ alert('Start a chat first.'); return; }
-    const chat = chats.find(c => c.id === activeChatId);
-    const newTitle = prompt('Enter a title for this chat:', chat.title || 'IC Check');
-    if(newTitle && newTitle.trim()){
-      chat.title = newTitle.trim();
-      renderChatList();
-    }
-  });
+  // Note: Save Chat button removed - chats are automatically saved to Supabase
+  // Chat titles are set automatically based on the first message or can be updated programmatically
+
+  // Setup language dropdown
+  setupLanguageDropdown();
+
+  // Setup language dropdown
+  setupLanguageDropdown();
 
   // basic esc to close collapsed sidebar on mobile: clicking outside closes (optional)
   document.addEventListener('click', (e) => {
@@ -487,18 +740,291 @@ This report is generated for demonstration purposes.
     URL.revokeObjectURL(url);
   }
 
-  // Check if we came from "New Chat" button
-  const urlParams = new URLSearchParams(window.location.search);
-  const isNewChatRequest = urlParams.get('new') === 'true';
+  // Load chats from Supabase on page load
+  async function loadChats() {
+    console.log('[Chat] Loading chats on page load...');
+    const urlParams = new URLSearchParams(window.location.search);
+    const chatId = urlParams.get('chatId');
+    const isNewChatRequest = urlParams.get('new') === 'true';
+    
+    console.log('[Chat] URL params - chatId:', chatId, 'new:', isNewChatRequest);
+    
+    if (chatService) {
+      console.log('[Chat] Using Supabase to load chats');
+      try {
+        const supabaseChats = await chatService.getUserChats();
+        console.log('[Chat] Received', supabaseChats.length, 'chats from Supabase');
+        
+        chats = supabaseChats.map(chat => ({
+          id: chat.id,
+          title: chat.title,
+          messages: [], // Messages will be loaded when chat is selected
+          created_at: chat.created_at,
+          updated_at: chat.updated_at
+        }));
+        
+        console.log('[Chat] Chats processed and stored locally');
+        
+        if (isNewChatRequest) {
+          console.log('[Chat] New chat requested, creating...');
+          const newChat = await createChat('New Detection');
+          console.log('[Chat] New chat created:', newChat);
+          // Reload chats from Supabase to ensure sidebar is updated
+          const updatedChats = await chatService.getUserChats();
+          chats = updatedChats.map(chat => ({
+            id: chat.id,
+            title: chat.title,
+            messages: [],
+            created_at: chat.created_at,
+            updated_at: chat.updated_at
+          }));
+          console.log('[Chat] Re-rendering chat list with', chats.length, 'chats');
+          renderChatList();
+          
+          // Verify chat list was rendered
+          setTimeout(() => {
+            const renderedItems = document.querySelectorAll('#chatList .chat-item');
+            console.log('[Chat] Verification: Chat list rendered with', renderedItems.length, 'items');
+            console.log('[Chat] Expected', chats.length, 'chats');
+            if (renderedItems.length !== chats.length) {
+              console.warn('[Chat] Mismatch! Re-rendering...');
+              renderChatList();
+            }
+          }, 200);
+          
+          // Set the newly created chat as active
+          if (newChat && newChat.id) {
+            console.log('[Chat] Setting newly created chat as active:', newChat.id);
+            await setActiveChat(newChat.id);
+          }
+          
+          window.history.replaceState({}, '', 'query.html');
+          console.log('[Chat] New chat flow completed successfully');
+        } else if (chatId) {
+          // Load specific chat
+          console.log('[Chat] Loading specific chat:', chatId);
+          await setActiveChat(chatId);
+          window.history.replaceState({}, '', 'query.html');
+        } else {
+          // Load first chat if available
+          if (chats.length > 0) {
+            console.log('[Chat] Loading first chat:', chats[0].id);
+            await setActiveChat(chats[0].id);
+          } else {
+            console.log('[Chat] No chats found, creating default chat');
+            await createChat('IC Check 1');
+          }
+        }
+        
+        renderChatList();
+        console.log('[Chat] Chat list rendered');
+      } catch (error) {
+        console.error('[Chat] Error loading chats:', error);
+        console.error('[Chat] Error details:', error.message);
+        // Fallback: create default chat
+        if (chats.length === 0) {
+          console.log('[Chat] Fallback: Creating default chat');
+          await createChat('IC Check 1');
+        }
+      }
+    } else {
+      console.log('[Chat] ChatService not available, using fallback');
+      // Fallback: check URL params
+      if (isNewChatRequest) {
+        console.log('[Chat] Creating new chat (fallback)');
+        await createChat('New Detection');
+        window.history.replaceState({}, '', 'query.html');
+      } else if (chats.length === 0) {
+        console.log('[Chat] Creating default chat (fallback)');
+        await createChat('IC Check 1');
+      }
+    }
+    
+    console.log('[Chat] Chat loading completed');
+  }
+
+  // Initialize: Load chats
+  console.log('[Chat] Starting chat initialization...');
+  await loadChats();
+  console.log('[Chat] Chat initialization completed');
   
-  if (isNewChatRequest) {
-    // Create a fresh new chat when coming from dashboard
-    createChat('New Detection');
-    // Clean up URL without reloading
-    window.history.replaceState({}, '', 'query.html');
-  } else if (chats.length === 0) {
-    // create default demo chat only if no chats exist
-  createChat('IC Check 1');
+  // Final check: Verify button handler is attached
+  const finalCheckBtn = document.getElementById('newChatBtn');
+  if (finalCheckBtn) {
+    console.log('[Chat] Final check: Button exists');
+  } else {
+    console.error('[Chat] Final check: Button STILL not found!');
   }
 });
 }); // End of checkAuth promise
+
+// Also set up button handler outside of DOMContentLoaded as fallback
+// This ensures it works even if DOMContentLoaded already fired
+(function() {
+  console.log('[Chat] Setting up fallback button handler...');
+  function setupFallback() {
+    const btn = document.getElementById('newChatBtn');
+    if (btn && !btn.dataset.handlerAttached) {
+      console.log('[Chat] Fallback: Attaching handler to button');
+      btn.dataset.handlerAttached = 'true';
+      btn.addEventListener('click', async function(e) {
+        console.log('[Chat] FALLBACK HANDLER: New Chat clicked!');
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (!window.location.pathname.includes('query.html')) {
+          window.location.href = 'query.html?new=true';
+        } else {
+          // Trigger page reload with new=true to create chat
+          console.log('[Chat] Fallback: Reloading with new=true');
+          window.location.href = 'query.html?new=true';
+        }
+      });
+    } else if (!btn) {
+      setTimeout(setupFallback, 100);
+    }
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFallback);
+  } else {
+    setupFallback();
+  }
+})();
+
+// Global function for inline onclick handler (fallback)
+window.handleNewChatClick = async function(e) {
+  console.log('[Chat] ========== INLINE HANDLER TRIGGERED ==========');
+  console.log('[Chat] INLINE HANDLER: New Chat button clicked!');
+  console.log('[Chat] Event:', e);
+  console.log('[Chat] Current URL:', window.location.href);
+  
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  // Check if we're on query page
+  if (!window.location.pathname.includes('query.html')) {
+    console.log('[Chat] Not on query page, navigating to query.html?new=true');
+    window.location.href = 'query.html?new=true';
+    return;
+  }
+  
+  // If already on query page, try to create chat
+  console.log('[Chat] Already on query page, attempting to create chat');
+  console.log('[Chat] Checking if createChat is available:', typeof window.createChat);
+  
+  // Wait a bit for createChat to be available if it's not yet
+  let attempts = 0;
+  while (typeof window.createChat !== 'function' && attempts < 10) {
+    console.log('[Chat] Waiting for createChat to be available, attempt:', attempts + 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    attempts++;
+  }
+  
+  try {
+    // Check if createChat is available in window scope
+    if (typeof window.createChat === 'function') {
+      console.log('[Chat] Calling window.createChat...');
+      await window.createChat('New Detection');
+      console.log('[Chat] Chat created via inline handler');
+    } else {
+      // Reload with new=true parameter
+      console.log('[Chat] createChat not available after waiting, reloading with new=true');
+      window.location.href = 'query.html?new=true';
+    }
+  } catch (error) {
+    console.error('[Chat] Error in inline handler:', error);
+    console.error('[Chat] Error stack:', error.stack);
+    // Fallback: reload with new=true
+    alert('Creating new chat...');
+    window.location.href = 'query.html?new=true';
+  }
+};
+
+// Setup language dropdown (same as dashboard)
+function setupLanguageDropdown() {
+  const langBtn = document.getElementById('langBtn');
+  const langMenu = document.getElementById('langMenu');
+  const langDisplay = document.getElementById('langDisplay');
+  
+  if (!langBtn || !langMenu || !langDisplay) {
+    console.log('[Chat] Language dropdown elements not found');
+    return;
+  }
+  
+  // Load saved language preference (default to English)
+  const savedLang = localStorage.getItem('authentIC_language') || 'en';
+  const savedLangOption = document.querySelector(`.lang-option[data-lang="${savedLang}"]`);
+  if (savedLangOption) {
+    langDisplay.textContent = savedLangOption.dataset.code;
+    document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+    savedLangOption.classList.add('active');
+    // Translate page if function is available and language is not English
+    if (savedLang !== 'en') {
+      setTimeout(() => {
+        if (typeof window.translatePage === 'function') {
+          window.translatePage(savedLang);
+        }
+      }, 100);
+    }
+  }
+
+  // Toggle dropdown
+  langBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[Chat] Language button clicked');
+    
+    // Close all other dropdowns first (if any)
+    document.querySelectorAll('.lang-menu').forEach(menu => {
+      if (menu !== langMenu) menu.classList.remove('show');
+    });
+    
+    // Toggle this menu
+    langMenu.classList.toggle('show');
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!langBtn.contains(e.target) && !langMenu.contains(e.target)) {
+      langMenu.classList.remove('show');
+    }
+  });
+
+  // Handle language selection
+  document.querySelectorAll('.lang-option').forEach(option => {
+    option.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const lang = option.dataset.lang;
+      const code = option.dataset.code;
+      
+      // Update display
+      langDisplay.textContent = code;
+      
+      // Update active state
+      document.querySelectorAll('.lang-option').forEach(opt => opt.classList.remove('active'));
+      option.classList.add('active');
+      
+      // Save preference
+      localStorage.setItem('authentIC_language', lang);
+      
+      // Close dropdown
+      langMenu.classList.remove('show');
+      
+      // Translate the page immediately
+      if (typeof window.translatePage === 'function') {
+        window.translatePage(lang).catch(err => {
+          console.error('[Chat] Translation error:', err);
+        });
+      } else {
+        console.error('[Chat] translatePage function not found');
+        document.documentElement.lang = lang;
+      }
+      
+      // Show confirmation (optional)
+      console.log(`[Chat] Language changed to: ${option.textContent}`);
+    });
+  });
+}

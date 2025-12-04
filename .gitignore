@@ -14,6 +14,32 @@ release/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and temporary files
 *.log
 npm-debug.log*
+api_server.log
+/tmp/api_server.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Test results and API outputs
+backend/api_results/
+backend/detection_results*/
+backend/detection_results_*/
+*.pdf
+!backend/tools/*.pdf  # Keep tool PDFs if needed
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+frontend/test-api.html

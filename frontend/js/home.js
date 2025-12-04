@@ -1,4 +1,18 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Ensure page starts at the top on load (unless there's a hash anchor)
+  if (!window.location.hash) {
+    window.scrollTo(0, 0);
+  } else {
+    // If there's a hash, scroll to it smoothly after a brief delay
+    setTimeout(() => {
+      const hash = window.location.hash.substring(1);
+      const targetElement = document.getElementById(hash);
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  }
+  
   const learnMoreBtn = document.getElementById("learnMoreBtn");
   const learnLink = document.getElementById("learnLink");
   const perfSection = document.getElementById("performance");

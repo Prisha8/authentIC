@@ -169,18 +169,33 @@
 
   
 
+  <script>
+    // Ensure page starts at top on load (unless there's a hash anchor)
+    if (!window.location.hash) {
+      window.scrollTo(0, 0);
+      // Also ensure on page show (handles back/forward navigation)
+      window.addEventListener('pageshow', function(event) {
+        if (!window.location.hash && event.persisted) {
+          window.scrollTo(0, 0);
+        }
+      });
+    }
+  </script>
   <script src="js/translations.js"></script>
   <script src="js/translate-api.js"></script>
   <!-- Dark Mode -->
   <script src="js/dark-mode.js"></script>
   <script src="js/home.js"></script>
-  <footer class="site-footer" role="contentinfo">
+  <footer id="about" class="site-footer" role="contentinfo">
   <div class="footer-inner">
     <div class="footer-col about">
       <h4 data-i18n="home.about.title">About us</h4>
       <p data-i18n="home.about.text">
         authentIC uses AI-driven visual and metadata analysis to identify counterfeit integrated circuits
         quickly and reliably — protecting manufacturers and supply chains with fast, secure verification.
+      </p>
+      <p class="footer-credits" style="margin-top: 16px; font-size: 0.9rem; color: var(--muted);">
+        Made by members at <strong style="color: var(--accent);">AIMS-DTU</strong>, the official AI and ML society of DTU.
       </p>
     </div>
   </div>

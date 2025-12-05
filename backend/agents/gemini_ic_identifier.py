@@ -37,24 +37,47 @@ def identify_ic(model, image_path: str) -> dict:
     Ask Gemini to identify IC and provide datasheet search info
     """
     
-    # Load image
-    img = Image.open(image_path)
+    # Load image and ensure it's fully in memory (not tied to file handle)
+    # Open, convert, and copy to ensure no file handle is retained
+    try:
+        with Image.open(image_path) as img_file:
+            # Convert to RGB and ensure image is loaded into memory
+            img_rgb = img_file.convert('RGB')
+            # Copy the image to create a new object independent of the file
+            img = img_rgb.copy()
+            # Force load all pixel data into memory
+            img.load()
+    except Exception as e:
+        raise IOError(f"Failed to load image from {image_path}: {e}")
     
     prompt = """
 You are an expert electronics engineer specializing in integrated circuit identification.
 
-Analyze this IC (Integrated Circuit) image carefully and extract the following information:
+Analyze this IC (Integrated Circuit) image carefully and extract ALL visible information:
 
 1. **Part Number**: The main part number/model number visible on the IC
 2. **Manufacturer**: The company that made this IC (look for logos, brand names, or manufacturer codes)
-3. **Package Type**: The physical package type (e.g., DIP, SOIC, QFP, QFN, etc.)
+3. **Package Type**: The physical package type (e.g., DIP, SOIC, QFP, QFN, TQFP, etc.)
 4. **Pin Count**: How many pins does this IC have? (count carefully)
-5. **Additional Markings**: Any other text visible (date codes, lot codes, country codes, etc.)
-6. **Visible Condition**: Brief assessment of the IC's physical condition
+5. **Date Codes**: Extract any date codes (typically YYWW format like 2345 = year 2023, week 45, or YYMM format)
+6. **Lot Codes**: Extract lot/batch codes (alphanumeric codes identifying manufacturing batch)
+7. **Country Codes**: Extract country of origin codes (e.g., "PH" for Philippines, "MY" for Malaysia, "CN" for China)
+8. **Temperature Grade**: Extract temperature grade codes (e.g., "I" for industrial, "C" for commercial, "M" for military)
+9. **Speed Grade**: Extract speed/performance grade codes if visible
+10. **Package Variant**: Extract package variant codes (e.g., "AU", "MU", "RC" suffixes)
+11. **Additional Markings**: Any other text, symbols, or codes visible
+12. **Visible Condition**: Brief assessment of the IC's physical condition
+
+For date codes, decode them:
+- YYWW format: First 2 digits = year (00-99, typically 00-23 = 2000-2023), last 2 digits = week (01-52)
+- YYMM format: First 2 digits = year, last 2 digits = month (01-12)
+- Provide both raw code and decoded meaning
+
+For lot codes, provide the raw code and explain what it typically represents (manufacturing batch/traceability)
 
 Then provide:
-7. **Datasheet Search Query**: The exact search terms to use to find the official datasheet
-8. **Expected Datasheet URL Pattern**: What the official datasheet URL might look like
+13. **Datasheet Search Query**: The exact search terms to use to find the official datasheet
+14. **Expected Datasheet URL Pattern**: What the official datasheet URL might look like
 
 Return your analysis as a JSON object with the following structure:
 {
@@ -62,7 +85,33 @@ Return your analysis as a JSON object with the following structure:
   "manufacturer": "manufacturer name",
   "package_type": "package type",
   "pin_count": number,
-  "additional_markings": ["marking1", "marking2"],
+  "date_codes": [
+    {
+      "raw": "2345",
+      "decoded": "Year 2023, Week 45",
+      "format": "YYWW",
+      "location": "description of where on IC"
+    }
+  ],
+  "lot_codes": [
+    {
+      "raw": "ABC123",
+      "meaning": "Manufacturing batch/traceability code",
+      "location": "description of where on IC"
+    }
+  ],
+  "country_codes": ["PH", "MY", etc.],
+  "temperature_grade": "I/C/M/etc.",
+  "speed_grade": "speed code if visible",
+  "package_variant": "variant suffix if visible",
+  "additional_markings": [
+    {
+      "text": "marking text",
+      "type": "description of what it is",
+      "location": "where on IC",
+      "decoded": "decoded meaning if applicable"
+    }
+  ],
   "condition_notes": "brief condition assessment",
   "datasheet_search": {
     "primary_query": "best search query",
@@ -78,10 +127,12 @@ Return your analysis as a JSON object with the following structure:
 }
 
 Important:
-- If you cannot read certain text clearly, indicate this in your confidence scores
+- Extract EVERYTHING visible on the IC - don't skip any markings
+- Decode date codes, lot codes, and other codes when possible
 - Be precise with part numbers (they are critical for finding the right datasheet)
 - Look carefully at manufacturer logos or text
 - Count pins carefully (especially important for package identification)
+- Provide decoded meanings for all codes you extract
 """
 
     # Generate response with retry logic

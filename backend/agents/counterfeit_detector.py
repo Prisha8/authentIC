@@ -161,7 +161,8 @@ class CounterfeitDetector:
                 datasheet_path, 
                 result.part_number,
                 result.package_type,
-                result.pin_count
+                result.pin_count,
+                result.manufacturer  # Pass Gemini's manufacturer identification
             )
             result.mechanical_diagram_path = mechanical_diagram
             result.parsed_specs = parsed_specs
@@ -190,7 +191,8 @@ class CounterfeitDetector:
             mechanical_diagram,
             parsed_specs,
             result,
-            dimension_analysis=dimension_dict  # Pass dimension analysis to Gemini
+            dimension_analysis=dimension_dict,  # Pass dimension analysis to Gemini
+            datasheet_pdf_path=result.datasheet_path  # Pass full PDF for comprehensive analysis
         )
         result.visual_comparison = visual_result
         result.anomalies = visual_result.get('anomalies', [])
@@ -247,20 +249,48 @@ class CounterfeitDetector:
             return None
     
     def _parse_datasheet(self, pdf_path: str, part_number: str, 
-                         package_type: str, pin_count: int) -> Tuple[Optional[str], Optional[Dict]]:
+                         package_type: str, pin_count: int, manufacturer: str = None) -> Tuple[Optional[str], Optional[Dict]]:
         """Step 3: Parse datasheet and extract mechanical diagram + specs"""
         try:
             parser = DatasheetParser(pdf_path, output_dir=str(self.output_dir / "diagrams"))
-            info = parser.parse(part_number, package_type, pin_count)
+            info = parser.parse(part_number, package_type, pin_count, manufacturer=manufacturer)
             
             # Save parsed info as JSON
             json_path = parser.save_summary(info)
             
-            # Select BEST mechanical diagram by reading page content
-            # Priority: pages with "outline" + dimensions table > mechanical data > others
-            # Avoid revision history pages
+            # FIRST: Try to use Gemini to identify the correct outline diagram page
+            gemini_page_num = self._identify_outline_page_with_gemini(
+                pdf_path, part_number, package_type, pin_count
+            )
+            
             best_diagram = None
-            if info.mechanical_diagrams:
+            best_page_num = None
+            
+            if gemini_page_num:
+                # Gemini found a page - extract it specifically
+                print(f"  → Using Gemini-identified page {gemini_page_num}")
+                try:
+                    import fitz  # PyMuPDF
+                    with fitz.open(pdf_path) as doc:
+                        if 1 <= gemini_page_num <= len(doc):
+                            page = doc[gemini_page_num - 1]
+                            # Extract page as image
+                            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+                            output_path = self.output_dir / "diagrams" / f"{part_number}_tavily_mechanical_{package_type}_page{gemini_page_num}.png"
+                            output_path.parent.mkdir(parents=True, exist_ok=True)
+                            pix.save(str(output_path))
+                            best_diagram = str(output_path)
+                            best_page_num = gemini_page_num
+                            print(f"  ✓ Extracted Gemini-identified page {gemini_page_num}")
+                            pix = None  # Clean up pixmap
+                except Exception as e:
+                    print(f"  ⚠️  Failed to extract Gemini-identified page: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    gemini_page_num = None  # Fall back to scoring
+            
+            # If Gemini didn't find a page, use scoring-based selection
+            if not best_diagram and info.mechanical_diagrams:
                 import re
                 import pdfplumber
                 
@@ -306,9 +336,25 @@ class CounterfeitDetector:
                                 score += 50
                                 print(f"    Page {page_num}: Follows MECHANICAL DATA header (+50)")
                         
-                        # Penalize revision history or index pages
-                        if 'revision history' in text_lower or 'document revision' in text_lower:
-                            score -= 200
+                        # HEAVILY penalize revision history or index pages
+                        revision_keywords = [
+                            'revision history', 'document revision', 'rev.', 'revision',
+                            'document change', 'change history', 'document history',
+                            'rev 7766', 'rev 7766g', 'rev 7766f', 'rev 7766e'  # Common revision patterns
+                        ]
+                        if any(keyword in text_lower for keyword in revision_keywords):
+                            score -= 500  # Heavy penalty
+                            print(f"    Page {page_num}: Revision history page (-500 penalty)")
+                        
+                        # Check for revision patterns in page numbers or headers
+                        if re.search(r'rev\.?\s*\d+[a-z]?', text_lower[:200]):  # Check first 200 chars
+                            score -= 300
+                            print(f"    Page {page_num}: Contains revision pattern (-300 penalty)")
+                        
+                        # Penalize pages that are mostly revision notes
+                        if 'updated the' in text_lower and 'on page' in text_lower:
+                            score -= 400
+                            print(f"    Page {page_num}: Revision notes page (-400 penalty)")
                         
                         # Penalize packaging materials pages (NOT IC dimensions)
                         if 'package materials' in text_lower or 'tape and reel' in text_lower:
@@ -325,14 +371,15 @@ class CounterfeitDetector:
                 
                 if scored_pages:
                     best_score, best_page_num, best_diagram = scored_pages[0]
-                    print(f"  → Selected best diagram: page {best_page_num} (score: {best_score})")
-                    
-                    # Re-parse dimensions from the BEST page only
-                    print(f"  → Re-parsing dimensions from page {best_page_num}...")
-                    parser._parse_package_dimensions(info, selected_page=best_page_num)
-                    
-                    # Save updated summary
-                    json_path = parser.save_summary(info)
+                    print(f"  → Selected best diagram using scoring: page {best_page_num} (score: {best_score})")
+            
+            # Re-parse dimensions from the selected page (either Gemini-identified or scored)
+            if best_page_num:
+                print(f"  → Re-parsing dimensions from page {best_page_num}...")
+                parser._parse_package_dimensions(info, selected_page=best_page_num)
+                
+                # Save updated summary
+                json_path = parser.save_summary(info)
             
             # Convert info to dict for Gemini
             parsed_data = {
@@ -353,75 +400,92 @@ class CounterfeitDetector:
             print(f"⚠️  Parsing failed: {e}")
             return None, None
     
-    def _estimate_package_dimensions(self, package_type: str, pin_count: int) -> Tuple[float, float]:
-        """
-        Estimate typical package dimensions based on package type and pin count
+    def _identify_outline_page_with_gemini(self, pdf_path: str, part_number: str, 
+                                          package_type: str, pin_count: int) -> Optional[int]:
+        """Use Gemini to identify the correct outline dimension page from the full PDF
         
+        Args:
+            pdf_path: Path to full PDF datasheet
+            part_number: IC part number
+            package_type: Target package type (e.g., "TQFP", "DIP", "QFN")
+            pin_count: Expected pin count
+            
         Returns:
-            (length_mm, width_mm) - typical dimensions for the package
+            Page number (1-indexed) of the outline diagram, or None if not found
         """
-        package_upper = package_type.upper()
-        
-        # DIP packages (elongated, ~2.5:1 ratio)
-        if 'DIP' in package_upper or 'PDIP' in package_upper:
-            if pin_count <= 8:
-                return (9.8, 6.4)  # DIP-8
-            elif pin_count <= 14:
-                return (19.2, 6.4)  # DIP-14
-            elif pin_count <= 16:
-                return (19.6, 7.6)  # DIP-16
+        try:
+            print("  → Asking Gemini to identify correct outline diagram page from PDF...")
+            
+            # Ensure PDF path is absolute and exists
+            pdf_path_obj = Path(pdf_path)
+            pdf_path_abs = pdf_path_obj.resolve()
+            if not pdf_path_abs.exists():
+                raise FileNotFoundError(f"PDF file not found: {pdf_path_abs}")
+            
+            # Upload PDF using absolute path
+            uploaded_file = genai.upload_file(path=str(pdf_path_abs))
+            
+            prompt = f"""You are analyzing a datasheet PDF for the IC part number: {part_number}
+
+**Target Package:**
+- Package Type: {package_type}
+- Pin Count: {pin_count}
+
+**Your Task:**
+Scan through the ENTIRE PDF and identify the page number that contains the **OUTLINE DIMENSION** or **PACKAGE OUTLINE** diagram for the {package_type} package with {pin_count} pins.
+
+**What to look for:**
+- Pages with mechanical/outline dimension drawings
+- Pages showing package dimensions (length, width, height) in millimeters
+- Pages with technical drawings showing pin layout and spacing
+- Pages titled "Package Outline", "Mechanical Dimensions", "Outline Dimensions", etc.
+
+**What to AVOID:**
+- Revision history pages (pages with "Rev.", "Revision History", "Document Revision")
+- Pages that only show text changes or update notes
+- Packaging/taping/reel information pages
+- Land pattern pages (unless they also contain outline dimensions)
+
+**Output Format (JSON only):**
+```json
+{{
+  "outline_page_number": <page number (1-indexed) or null>,
+  "confidence": "high|medium|low",
+  "reasoning": "Brief explanation of why this page was selected"
+}}
+```
+
+If you cannot find a suitable outline dimension page, return null for outline_page_number.
+"""
+            
+            response = self.analysis_model.generate_content([prompt, uploaded_file])
+            
+            # Parse JSON response
+            import re
+            json_match = re.search(r'\{[^{}]*"outline_page_number"[^{}]*\}', response.text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                page_num = result.get('outline_page_number')
+                confidence = result.get('confidence', 'unknown')
+                reasoning = result.get('reasoning', '')
+                
+                if page_num:
+                    print(f"  ✓ Gemini identified outline diagram on page {page_num} (confidence: {confidence})")
+                    if reasoning:
+                        print(f"    Reasoning: {reasoning}")
+                    return int(page_num)
+                else:
+                    print(f"  ⚠️  Gemini could not identify outline diagram page")
+                    return None
             else:
-                return (pin_count * 1.2, 7.6)  # Estimate
-        
-        # SOIC packages (elongated, ~2:1 ratio)
-        elif 'SOIC' in package_upper or 'SO' in package_upper:
-            if pin_count <= 8:
-                return (5.0, 4.0)  # SOIC-8
-            elif pin_count <= 14:
-                return (8.7, 3.9)  # SOIC-14
-            elif pin_count <= 16:
-                return (10.0, 3.9)  # SOIC-16
-            elif pin_count <= 28:
-                return (18.0, 7.5)  # SOIC-28
-            else:
-                return (pin_count * 0.6, 7.5)
-        
-        # QFP/LQFP packages (square, 1:1 ratio)
-        elif 'QFP' in package_upper or 'LQFP' in package_upper or 'TQFP' in package_upper:
-            if pin_count <= 32:
-                return (7.0, 7.0)  # LQFP-32
-            elif pin_count <= 48:
-                return (7.0, 7.0)  # LQFP-48
-            elif pin_count <= 64:
-                return (10.0, 10.0)  # LQFP-64
-            elif pin_count <= 100:
-                return (14.0, 14.0)  # LQFP-100
-            else:
-                return (20.0, 20.0)  # LQFP-144+
-        
-        # QFN packages (square, 1:1 ratio)
-        elif 'QFN' in package_upper or 'MLF' in package_upper:
-            if pin_count <= 16:
-                return (3.0, 3.0)  # QFN-16
-            elif pin_count <= 32:
-                return (5.0, 5.0)  # QFN-32
-            elif pin_count <= 48:
-                return (7.0, 7.0)  # QFN-48
-            else:
-                return (9.0, 9.0)  # QFN-64+
-        
-        # BGA packages (square, 1:1 ratio)
-        elif 'BGA' in package_upper:
-            if pin_count <= 64:
-                return (8.0, 8.0)
-            elif pin_count <= 100:
-                return (10.0, 10.0)
-            else:
-                return (15.0, 15.0)
-        
-        # Default: assume square package
-        else:
-            return (10.0, 10.0)
+                print(f"  ⚠️  Could not parse Gemini response: {response.text[:200]}")
+                return None
+                
+        except Exception as e:
+            print(f"  ⚠️  Gemini page identification failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _extract_dimensions_with_gemini(self, diagram_path: str) -> Optional[Dict]:
         """Use Gemini VLM to extract dimensions from mechanical diagram
@@ -451,14 +515,14 @@ Extract the following dimensions from this technical drawing. Look for dimension
 
 **Output Format (JSON only, no explanation):**
 ```json
-{
+{{
   "body_length_mm": <number or null>,
   "body_width_mm": <number or null>,
   "height_mm": <number or null>,
   "pin_count": <number or null>,
   "pin_pitch_mm": <number or null>,
   "package_type": "<string or null>"
-}
+}}
 ```
 
 If you cannot find a specific dimension, use null. Be precise with numbers.
@@ -502,7 +566,7 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             (dimension_dict, visualization_path)
         """
         try:
-            # Get expected dimensions from parsed specs or use intelligent defaults
+            # Get expected dimensions from Gemini extraction or datasheet parser
             expected_length = None
             expected_width = None
             dimension_source = None
@@ -540,17 +604,17 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
                 if expected_length and expected_width:
                     dimension_source = "datasheet_parser"
             
-            # Priority 3: Fallback to package-type-based heuristics
+            # If no ground truth dimensions available, still run estimator for measured values
             if not expected_length or not expected_width:
-                print(f"  ⚠️  No extracted dimensions available, using package type heuristics...")
-                expected_length, expected_width = self._estimate_package_dimensions(result.package_type, result.pin_count)
-                print(f"     Estimated: {expected_length} × {expected_width} mm (based on {result.package_type})")
-                dimension_source = "heuristics"
+                print(f"  ⚠️  No ground truth dimensions available from datasheet or Gemini extraction.")
+                print(f"     Running dimension estimator anyway - will provide measured aspect ratio for Gemini analysis.")
+                dimension_source = "no_ground_truth"
             
+            # Always run dimension estimator (works with or without expected dimensions)
             dim_result = estimate_dimensions(
                 str(image_path),
-                expected_length,
-                expected_width
+                expected_length,  # Can be None - estimator handles this
+                expected_width    # Can be None - estimator handles this
             )
             
             # Generate visualization
@@ -565,11 +629,14 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
                 shutil.move(default_viz, viz_path)
             
             # Convert DimensionResult to dict
+            body_bbox = [b for b in dim_result.bboxes if b['type'] == 'ic_body'][0] if dim_result.bboxes else {}
             dim_dict = {
                 'measured_aspect_ratio': dim_result.measured_aspect_ratio,
                 'expected_aspect_ratio': dim_result.expected_aspect_ratio,
                 'confidence_score': dim_result.dimension_score,
                 'bboxes': dim_result.bboxes,
+                'body_width_px': body_bbox.get('w', dim_result.body_width_px),
+                'body_height_px': body_bbox.get('h', dim_result.body_height_px),
                 'verdict': dim_result.verdict,
                 'dimension_source': dimension_source,  # Track where dimensions came from
                 'expected_length_mm': expected_length,
@@ -577,7 +644,10 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             }
             
             print(f"  ✓ Dimension analysis complete (source: {dimension_source})")
-            print(f"    Expected: {expected_length} × {expected_width} mm (AR: {dim_dict['expected_aspect_ratio']:.2f})")
+            if expected_length and expected_width:
+                print(f"    Expected: {expected_length} × {expected_width} mm (AR: {dim_dict['expected_aspect_ratio']:.2f})")
+            else:
+                print(f"    No ground truth available - measured values only")
             print(f"    Measured: AR = {dim_dict['measured_aspect_ratio']:.2f}")
             print(f"    Score: {dim_dict['confidence_score']:.1f}/100")
             print(f"    Visualization saved: {Path(viz_path).name}")
@@ -593,36 +663,71 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
                                 mechanical_diagram: Optional[str],
                                 parsed_specs: Optional[Dict],
                                 result: DetectionResult,
-                                dimension_analysis: Optional[Dict] = None) -> Dict:
-        """Step 5: Gemini visual comparison and anomaly detection"""
+                                dimension_analysis: Optional[Dict] = None,
+                                datasheet_pdf_path: Optional[str] = None) -> Dict:
+        """Step 5: Gemini visual comparison and anomaly detection
+        
+        Args:
+            datasheet_pdf_path: Optional path to full PDF datasheet for Gemini to analyze entirely
+        """
         
         try:
             # Load IC image
             ic_image = Image.open(ic_image_path)
             
             # Build prompt with parsed specs and dimension analysis
-            prompt = self._build_analysis_prompt(result, mechanical_diagram is not None, parsed_specs, dimension_analysis)
+            prompt = self._build_analysis_prompt(result, mechanical_diagram is not None, parsed_specs, dimension_analysis, datasheet_pdf_path is not None)
             
-            # If we have mechanical diagram, include it
-            if mechanical_diagram:
+            # Build content list
+            content = [prompt, ic_image]
+            
+            # If we have the full PDF, upload it to Gemini for complete analysis
+            if datasheet_pdf_path:
+                pdf_path_obj = Path(datasheet_pdf_path)
+                # Resolve to absolute path and verify it exists
+                pdf_path_abs = pdf_path_obj.resolve()
+                if pdf_path_abs.exists():
+                    print("  → Uploading full PDF datasheet to Gemini for complete analysis...")
+                    try:
+                        # Use absolute path for upload
+                        uploaded_file = genai.upload_file(path=str(pdf_path_abs))
+                        print(f"  ✓ PDF uploaded: {uploaded_file.uri}")
+                        content.append(f"\n\nFULL OEM DATASHEET PDF (uploaded):")
+                        content.append(uploaded_file)
+                        print("  → Gemini will analyze the entire PDF for comprehensive comparison...")
+                    except Exception as pdf_err:
+                        print(f"  ⚠️  PDF upload failed ({pdf_err}), falling back to extracted diagram")
+                        import traceback
+                        traceback.print_exc()
+                        datasheet_pdf_path = None  # Fallback to diagram
+                else:
+                    print(f"  ⚠️  PDF file not found at {pdf_path_abs}, falling back to extracted diagram")
+                    datasheet_pdf_path = None
+            
+            # If we have mechanical diagram (and didn't upload full PDF), include it
+            if mechanical_diagram and not datasheet_pdf_path:
                 diagram_image = Image.open(mechanical_diagram)
-                
-                # Build content list
-                content = [prompt, ic_image]
-                
-                # Add parsed specs as JSON
-                if parsed_specs:
-                    content.append("\n\nPARSED DATASHEET SPECIFICATIONS (JSON):")
-                    content.append(json.dumps(parsed_specs, indent=2))
-                
                 content.append("\n\nDATASHEET MECHANICAL DIAGRAM:")
                 content.append(diagram_image)
-                
+            
+            # Add parsed specs as JSON (always include for reference)
+            if parsed_specs:
+                content.append("\n\nPARSED DATASHEET SPECIFICATIONS (JSON):")
+                content.append(json.dumps(parsed_specs, indent=2))
+            
+            # Add dimension analysis as JSON
+            if dimension_analysis:
+                content.append("\n\nCV DIMENSION ANALYSIS RESULTS (JSON):")
+                content.append(json.dumps(dimension_analysis, indent=2))
+            
+            if datasheet_pdf_path:
+                print("  → Comparing IC image with full datasheet PDF...")
+            elif mechanical_diagram:
                 print("  → Comparing IC image with datasheet (diagram + specs)...")
-                response = self.analysis_model.generate_content(content)
             else:
                 print("  → Analyzing IC image (no datasheet available)...")
-                response = self.analysis_model.generate_content([prompt, ic_image])
+            
+            response = self.analysis_model.generate_content(content)
             
             # Parse response
             analysis = self._parse_gemini_response(response.text)
@@ -636,7 +741,7 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             print(f"  ✗ Visual analysis failed: {e}")
             return {'anomalies': [], 'observations': str(e)}
     
-    def _build_analysis_prompt(self, result: DetectionResult, has_diagram: bool, parsed_specs: Optional[Dict] = None, dimension_analysis: Optional[Dict] = None) -> str:
+    def _build_analysis_prompt(self, result: DetectionResult, has_diagram: bool, parsed_specs: Optional[Dict] = None, dimension_analysis: Optional[Dict] = None, has_full_pdf: bool = False) -> str:
         """Build prompt for Gemini visual analysis"""
         
         base_prompt = f"""You are an expert in counterfeit IC detection. Analyze this IC image for authenticity.
@@ -659,28 +764,64 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
 """
 
         if dimension_analysis:
+            expected_ar = dimension_analysis.get('expected_aspect_ratio')
+            expected_length = dimension_analysis.get('expected_length_mm')
+            expected_width = dimension_analysis.get('expected_width_mm')
+            dimension_source = dimension_analysis.get('dimension_source', 'unknown')
+            
             base_prompt += f"""
 **CV Dimension Analysis Results:**
-- Expected Aspect Ratio: {dimension_analysis.get('expected_aspect_ratio', '?'):.2f} (from {dimension_analysis.get('dimension_source', 'unknown')})
-- Measured Aspect Ratio: {dimension_analysis.get('measured_aspect_ratio', '?'):.2f}
+- Measured Aspect Ratio: {dimension_analysis.get('measured_aspect_ratio', '?'):.2f}"""
+            
+            if expected_ar is not None:
+                base_prompt += f"""
+- Expected Aspect Ratio: {expected_ar:.2f} (from {dimension_source})
+- Expected Dimensions: {expected_length} × {expected_width} mm
 - Dimension Match Score: {dimension_analysis.get('confidence_score', '?'):.1f}/100
 - Verdict: {dimension_analysis.get('verdict', 'UNKNOWN')}
-- Expected Dimensions: {dimension_analysis.get('expected_length_mm', '?')} × {dimension_analysis.get('expected_width_mm', '?')} mm
 
 **Note:** Use this CV analysis to inform your assessment. If the dimension score is low, investigate why (wrong package type identification, orientation, or actual dimensional mismatch).
 """
+            else:
+                base_prompt += f"""
+- Expected Aspect Ratio: N/A (no ground truth available - datasheet dimensions not extracted)
+- Dimension Source: {dimension_source}
 
-        base_prompt += """
-**Your Task:**
-1. Examine the IC image carefully for signs of counterfeiting
-2. Check for: text quality, surface texture, pin alignment, package dimensions, markings
+**Note:** No ground truth dimensions available for comparison. Use the measured aspect ratio ({dimension_analysis.get('measured_aspect_ratio', '?'):.2f}) to assess if it's reasonable for the identified package type ({result.package_type}). An absurd aspect ratio (e.g., extremely elongated or square when it should be the opposite) could indicate a counterfeit.
 """
 
-        if has_diagram:
-            base_prompt += """3. Compare the IC image with the datasheet mechanical diagram AND parsed specifications
-4. Verify dimensional accuracy, pin count, package type match the datasheet
-5. Check if pin spacing matches the specified pin pitch
-6. Cross-validate with the CV dimension analysis results above
+        base_prompt += """
+**Your Task (explicit checklist):**
+1) Count pins in the IC photo and compare to the datasheet pin count; flag any mismatch.
+2) Check pin pitch and row-to-row spacing vs datasheet/diagram; note alignment/warping.
+3) Verify package type and outline (DIP/SOIC/QFN/QFP/BGA, corners/chamfer, exposed pad presence/size).
+4) Verify pin-1 indicator (dot/notch/bevel) location matches the datasheet diagram orientation.
+5) Compare body dimensions/aspect ratio to datasheet/diagram (use CV dimension analysis above); flag implausible ratios.
+6) Validate markings: part number, manufacturer/logo style/placement, font weight/kerning, line layout, date/lot code format/placement.
+7) For QFN/BGA: check pad/ball grid dimensions, exposed pad alignment, ball/pad count vs diagram.
+8) Assess surface texture/erosion/remarking (uniformity, sanding signs).
+"""
+
+        if has_full_pdf:
+            base_prompt += """9) Cross-check IC photo with the FULL OEM DATASHEET PDF provided:
+   - Review ALL mechanical diagram pages (not just the selected one)
+   - Check for the correct package variant (avoid revision history pages)
+   - Verify dimensions from the actual outline dimension pages
+   - Compare pin configurations, markings, and physical specifications
+   - The full PDF gives you complete context - use it comprehensively
+   
+10) Cross-check IC photo with parsed specs JSON (provided for quick reference):
+- Pin count, pin pitch, and layout match
+- Package outline/size and orientation match
+- Marking placement relative to notch/pin-1 is consistent
+- Use CV dimension analysis above as supporting evidence
+"""
+        elif has_diagram:
+            base_prompt += """9) Cross-check IC photo with datasheet mechanical diagram AND parsed specs:
+- Pin count, pin pitch, and layout match
+- Package outline/size and orientation match
+- Marking placement relative to notch/pin-1 is consistent
+- Use CV dimension analysis above as supporting evidence
 """
 
         base_prompt += """
@@ -884,12 +1025,70 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
         story.append(Spacer(1, 0.2*inch))
         
         # Dimension Analysis Visualization (if available)
-        if result.dimension_visualization and Path(result.dimension_visualization).exists():
+        if result.dimension_visualization and Path(result.dimension_visualization).exists() and result.dimension_analysis:
             story.append(PageBreak())
             story.append(Paragraph("DIMENSION ANALYSIS", styles['Heading2']))
-            dim_viz = RLImage(result.dimension_visualization, width=7*inch, height=5*inch, kind='proportional')
+            story.append(Spacer(1, 0.08*inch))
+            
+            # Image with detected bbox (compact)
+            dim_viz = RLImage(result.dimension_visualization, width=6.2*inch, height=4.6*inch, kind='proportional')
             story.append(dim_viz)
-            story.append(Spacer(1, 0.2*inch))
+            story.append(Spacer(1, 0.18*inch))
+            
+            # Dimension Analysis Table (compact)
+            dim_data = result.dimension_analysis
+            measured_ar = dim_data.get('measured_aspect_ratio')
+            measured_ar_str = f"{measured_ar:.3f}" if isinstance(measured_ar, (int, float)) else 'N/A'
+            
+            dim_table_data = [
+                ['Parameter', 'Value'],
+                ['Measured Aspect Ratio', measured_ar_str],
+                ['Body Width (px)', f"{dim_data.get('body_width_px', 'N/A')}"],
+                ['Body Height (px)', f"{dim_data.get('body_height_px', 'N/A')}"],
+            ]
+            
+            expected_ar = dim_data.get('expected_aspect_ratio')
+            if expected_ar is not None and isinstance(expected_ar, (int, float)):
+                expected_ar_str = f"{expected_ar:.3f}"
+                if isinstance(measured_ar, (int, float)):
+                    error_percent = abs(measured_ar - expected_ar) / expected_ar * 100
+                    match_status = 'YES ✓' if error_percent < 10 else 'NO ✗'
+                else:
+                    match_status = 'N/A'
+                
+                dim_table_data.extend([
+                    ['Expected Aspect Ratio', expected_ar_str],
+                    ['Expected Length (mm)', f"{dim_data.get('expected_length_mm', 'N/A')}"],
+                    ['Expected Width (mm)', f"{dim_data.get('expected_width_mm', 'N/A')}"],
+                    ['Dimension Source', dim_data.get('dimension_source', 'N/A')],
+                    ['Aspect Ratio Match', match_status],
+                ])
+            else:
+                dim_table_data.append(['Dimension Source', dim_data.get('dimension_source', 'N/A')])
+            
+            confidence_score = dim_data.get('confidence_score')
+            score_str = f"{confidence_score:.1f}/100" if isinstance(confidence_score, (int, float)) else 'N/A'
+            dim_table_data.extend([
+                ['Dimension Score', score_str],
+                ['Verdict', dim_data.get('verdict', 'N/A')],
+            ])
+            
+            dim_table = Table(dim_table_data, colWidths=[2.8*inch, 3.4*inch])
+            dim_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a4a4a')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8e8e8')),
+                ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#333333')),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10.5),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+                ('PADDING', (0, 0), (-1, -1), 6),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(dim_table)
+            story.append(Spacer(1, 0.12*inch))
         
         # Mechanical Diagram (if available)
         if result.mechanical_diagram_path and Path(result.mechanical_diagram_path).exists():

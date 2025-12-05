@@ -18,9 +18,9 @@ class ICDetectionAPI {
     formData.append('image', imageFile);
 
     try {
-      // Increase timeout to 120 seconds (detection can take 25-40 seconds)
+      // Increase timeout to 5 minutes (long detections with Gemini + PDF generation)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 seconds
 
       const response = await fetch(`${this.baseUrl}/detect`, {
         method: 'POST',

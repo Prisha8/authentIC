@@ -23,6 +23,7 @@ from scipy import stats
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Optional
 import json
+from pathlib import Path
 
 # Set matplotlib to use non-GUI backend (required for Flask/threading)
 import matplotlib
@@ -61,16 +62,14 @@ class DimensionResult:
     # Evidence
     bboxes: List[Dict]
     metrics: Dict
-
-
-def detect_ic_body(image_path: str) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
-    """
-    Detect ONLY the IC body (dark rectangular region)
-    Ignore pins - we only care about body dimensions
     
+
+def detect_ic_body(image_path: str) -> Tuple[np.ndarray, Dict]:
+    """
+    Simple IC body detection using minAreaRect (older, simpler approach).
     Returns:
         image: Original image
-        bbox: (x, y, w, h) of IC body
+        rect: dict with x, y, w, h (axis-aligned) and box_pts (rotated box)
     """
     img = cv2.imread(image_path)
     if img is None:
@@ -79,28 +78,21 @@ def detect_ic_body(image_path: str) -> Tuple[np.ndarray, Tuple[int, int, int, in
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
     
-    # Strategy: Find the DARK rectangular region (IC body is dark/black)
-    # Use aggressive thresholding to isolate only the dark body
+    # Simple threshold to isolate dark IC body
+    _, dark_mask = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
     
-    # 1. Threshold to find DARK regions only (IC body is typically < 80 brightness)
-    _, dark_mask = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
-    
-    # 2. Clean up noise
+    # Clean up noise
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
     
-    # 3. Find contours
     contours, _ = cv2.findContours(dark_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # 4. Find the largest RECTANGULAR dark region
     best_rect = None
     best_score = 0
     
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        
-        # Must be substantial (at least 10% of image, but not more than 70%)
         if area < (h * w * 0.10) or area > (h * w * 0.70):
             continue
         
@@ -125,14 +117,43 @@ def detect_ic_body(image_path: str) -> Tuple[np.ndarray, Tuple[int, int, int, in
         
         if score > best_score:
             best_score = score
-            best_rect = (x, y, bw, bh)
+            best_rect = {
+                'x': x, 'y': y, 'w': bw, 'h': bh,
+                'rw': max(bw, bh),  # Longer side
+                'rh': min(bw, bh),  # Shorter side
+                'angle': 0,
+                'box_pts': [
+                    [x, y],
+                    [x + bw, y],
+                    [x + bw, y + bh],
+                    [x, y + bh]
+                ],
+                'method': 'simple'
+            }
     
     if best_rect is None:
         # Fallback: use center 50% of image
         margin_h = int(h * 0.25)
         margin_w = int(w * 0.25)
-        best_rect = (margin_w, margin_h, w - 2*margin_w, h - 2*margin_h)
+        best_rect = {
+            'x': margin_w,
+            'y': margin_h,
+            'w': w - 2*margin_w,
+            'h': h - 2*margin_h,
+            'rw': max(w - 2*margin_w, h - 2*margin_h),
+            'rh': min(w - 2*margin_w, h - 2*margin_h),
+            'angle': 0,
+            'box_pts': [
+                [margin_w, margin_h],
+                [w - margin_w, margin_h],
+                [w - margin_w, h - margin_h],
+                [margin_w, h - margin_h],
+            ],
+            'method': 'fallback'
+        }
         print("⚠️  Warning: Could not detect IC body, using fallback bbox")
+    else:
+        print(f"✓ IC body detected - sides: {best_rect['rw']:.1f} × {best_rect['rh']:.1f} px")
     
     return img, best_rect
 
@@ -250,10 +271,11 @@ def estimate_dimensions(
         DimensionResult with analysis
     """
     # Detect IC body
-    img, (x, y, bw, bh) = detect_ic_body(image_path)
+    img, rect = detect_ic_body(image_path)
+    x, y, bw, bh = rect['x'], rect['y'], rect['w'], rect['h']
     
     # Calculate aspect ratio
-    measured_aspect = max(bw, bh) / min(bw, bh)
+    measured_aspect = max(rect['rw'], rect['rh']) / min(rect['rw'], rect['rh'])
     
     # Expected aspect ratio
     expected_aspect = None
@@ -306,6 +328,12 @@ def estimate_dimensions(
         verdict = "MISMATCH"
     
     # Build bboxes for visualization
+    rw = rect.get('rw', bw)
+    rh = rect.get('rh', bh)
+    box_pts = rect.get('box_pts', None)
+    if box_pts:
+        # Convert to list of lists of ints
+        box_pts = [[int(p[0]), int(p[1])] for p in box_pts]
     bboxes = [
         {
             'type': 'ic_body',
@@ -313,7 +341,11 @@ def estimate_dimensions(
             'y': int(y),
             'w': int(bw),
             'h': int(bh),
-            'label': f'IC Body: {bw}×{bh}px (AR: {measured_aspect:.3f})'
+            'rw': int(rw),
+            'rh': int(rh),
+            'angle': rect.get('angle', 0),
+            'box_pts': box_pts,
+            'label': f'IC Body: {int(rw)}×{int(rh)} px (AR: {measured_aspect:.3f})'
         }
     ]
     
@@ -344,134 +376,62 @@ def estimate_dimensions(
 
 def visualize_dimensions(image_path: str, result: DimensionResult):
     """
-    Visualize dimension analysis with bboxes and annotations
+    Create a clean visualization showing only the image with detected IC body bbox.
+    All detailed metrics will be shown in the PDF table instead.
     """
     img = cv2.imread(image_path)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
-    fig = plt.figure(figsize=(20, 12))
+    fig, ax = plt.subplots(figsize=(12, 9))
+    ax.imshow(img_rgb)
     
-    # Original with annotations
-    ax1 = plt.subplot(2, 3, 1)
-    ax1.imshow(img_rgb)
-    ax1.set_title('Original Image', fontsize=14, fontweight='bold')
-    ax1.axis('off')
-    
-    # Annotated with bboxes
-    ax2 = plt.subplot(2, 3, 2)
-    ax2.imshow(img_rgb)
-    
-    # Draw IC body
+    # Draw IC body bbox (rotated if available)
     body_bbox = [b for b in result.bboxes if b['type'] == 'ic_body'][0]
-    rect = patches.Rectangle(
-        (body_bbox['x'], body_bbox['y']),
-        body_bbox['w'], body_bbox['h'],
-        linewidth=3, edgecolor='red', facecolor='none'
-    )
-    ax2.add_patch(rect)
-    ax2.text(
-        body_bbox['x'], body_bbox['y'] - 10,
-        body_bbox['label'],
-        color='red', fontsize=10, fontweight='bold',
-        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
-    )
+    rw = body_bbox.get('rw', body_bbox.get('w', 0))
+    rh = body_bbox.get('rh', body_bbox.get('h', 0))
     
-    # Draw pins
-    pin_bboxes = [b for b in result.bboxes if b['type'] == 'pin']
-    for pin_bbox in pin_bboxes:
-        rect = patches.Rectangle(
-            (pin_bbox['x'], pin_bbox['y']),
-            pin_bbox['w'], pin_bbox['h'],
-            linewidth=2, edgecolor='green', facecolor='none'
-        )
-        ax2.add_patch(rect)
-    
-    ax2.set_title(f'Detected Regions ({len(pin_bboxes)} pins)', fontsize=14, fontweight='bold')
-    ax2.axis('off')
-    
-    # Aspect ratio comparison
-    ax3 = plt.subplot(2, 3, 3)
-    ax3.axis('off')
-    
-    if result.expected_aspect_ratio:
-        categories = ['Measured', 'Expected']
-        values = [result.measured_aspect_ratio, result.expected_aspect_ratio]
-        colors = ['blue', 'green']
-        
-        bars = ax3.barh(categories, values, color=colors, alpha=0.7, edgecolor='black', linewidth=2)
-        ax3.set_xlabel('Aspect Ratio', fontsize=12)
-        ax3.set_title('Aspect Ratio Comparison', fontsize=14, fontweight='bold')
-        ax3.grid(True, alpha=0.3, axis='x')
-        
-        for bar, val in zip(bars, values):
-            ax3.text(val + 0.05, bar.get_y() + bar.get_height()/2,
-                    f'{val:.3f}', va='center', fontweight='bold')
+    if body_bbox.get('box_pts'):
+        pts = np.array(body_bbox['box_pts'])
+        poly = patches.Polygon(pts, closed=True, linewidth=4, edgecolor='#FF4444', facecolor='none')
+        ax.add_patch(poly)
+        # Position label at center horizontally, below the box vertically
+        bx = pts[:,0].mean()
+        by = pts[:,1].max() + 30  # Below the box
     else:
-        ax3.text(0.5, 0.5, f'Measured Aspect Ratio:\n{result.measured_aspect_ratio:.3f}\n\n(No expected value provided)',
-                ha='center', va='center', fontsize=12, fontweight='bold')
+        rect = patches.Rectangle(
+            (body_bbox['x'], body_bbox['y']),
+            body_bbox['w'], body_bbox['h'],
+            linewidth=4, edgecolor='#FF4444', facecolor='none'
+        )
+        ax.add_patch(rect)
+        bx = body_bbox['x'] + body_bbox['w']/2
+        by = body_bbox['y'] + body_bbox['h'] + 30
     
-    # Metrics summary
-    ax4 = plt.subplot(2, 3, 4)
-    ax4.axis('off')
+    # Add label (below the box to avoid overlap with title)
+    label_text = f"IC Body Detected\n{int(rw)}×{int(rh)} px\nAR: {result.measured_aspect_ratio:.3f}"
+    ax.text(
+        bx, 
+        by + 20,
+        label_text,
+        color='#FF4444', 
+        fontsize=12, 
+        fontweight='bold',
+        ha='center',
+        va='top',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', edgecolor='#FF4444', linewidth=2, alpha=0.9)
+    )
     
-    summary = f"""
-DIMENSION ANALYSIS
-{'='*35}
-
-Body Dimensions:
-  Width:  {result.body_width_px} px
-  Height: {result.body_height_px} px
-  Aspect: {result.measured_aspect_ratio:.3f}
-
-Expected (from datasheet):
-  Length: {result.expected_length_mm or 'N/A'} mm
-  Width:  {result.expected_width_mm or 'N/A'} mm
-  Aspect: {result.expected_aspect_ratio or 'N/A'}
-
-Comparison:
-  Match:  {'YES ✓' if result.aspect_ratio_match else 'NO ✗'}
-  Error:  {result.aspect_ratio_error_percent:.2f}%
-
-Pin Analysis:
-  Detected: {result.metrics['pin_count_detected']} pins
-  Uniformity: {result.pin_pitch_uniformity or 'N/A'}
-  Consistent: {'YES ✓' if result.pin_spacing_consistent else 'NO ✗'}
-    """
-    
-    color = 'green' if result.verdict == "MATCH" else 'orange' if result.verdict == "SUSPICIOUS" else 'red'
-    ax4.text(0.05, 0.5, summary, fontsize=10, family='monospace',
-             verticalalignment='center', color=color)
-    
-    # Score gauge
-    ax5 = plt.subplot(2, 3, 5)
-    ax5.axis('off')
-    
-    score_color = 'green' if result.dimension_score >= 80 else 'orange' if result.dimension_score >= 50 else 'red'
-    
-    ax5.text(0.5, 0.6, f"{result.dimension_score:.1f}/100",
-             ha='center', va='center', fontsize=48, fontweight='bold', color=score_color)
-    ax5.text(0.5, 0.4, "Dimension Score",
-             ha='center', va='center', fontsize=14, fontweight='bold')
-    ax5.text(0.5, 0.3, f"Confidence: {result.confidence*100:.0f}%",
-             ha='center', va='center', fontsize=12)
-    
-    # Verdict
-    ax6 = plt.subplot(2, 3, 6)
-    ax6.axis('off')
-    
-    verdict_color = 'green' if result.verdict == "MATCH" else 'orange' if result.verdict == "SUSPICIOUS" else 'red'
-    
-    ax6.text(0.5, 0.5, f"{result.verdict}\n\n{result.dimension_score:.1f}/100\n\nConfidence: {result.confidence*100:.0f}%",
-             ha='center', va='center', fontsize=18, fontweight='bold', color=verdict_color,
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5, pad=1))
+    ax.set_title('Dimension Analysis - Detected IC Body', fontsize=16, fontweight='bold', pad=20)
+    ax.axis('off')
     
     plt.tight_layout()
     
-    output_path = image_path.replace('.png', '_dimension_analysis.png')
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    print(f"\n✅ Saved visualization: {output_path}")
-    
-    plt.show()
+    # Always save to PNG alongside the original, avoid overwriting non-PNG inputs
+    img_path = Path(image_path)
+    output_path = str(img_path.with_name(f"{img_path.stem}_dimension_analysis.png"))
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()  # Close to avoid display issues
+    print(f"✅ Saved visualization: {output_path}")
 
 
 def save_results(result: DimensionResult, output_path: str):
@@ -481,6 +441,13 @@ def save_results(result: DimensionResult, output_path: str):
     # Convert booleans to int for JSON compatibility
     result_dict['aspect_ratio_match'] = int(result_dict['aspect_ratio_match'])
     result_dict['pin_spacing_consistent'] = int(result_dict['pin_spacing_consistent'])
+    
+    # Convert numpy types in bboxes to native Python types
+    for bbox in result_dict.get('bboxes', []):
+        if 'box_pts' in bbox and bbox['box_pts']:
+            bbox['box_pts'] = [[int(p[0]), int(p[1])] for p in bbox['box_pts']]
+        if 'vertices' in bbox and bbox['vertices']:
+            bbox['vertices'] = [[int(p[0]), int(p[1])] for p in bbox['vertices']]
     
     with open(output_path, 'w') as f:
         json.dump(result_dict, f, indent=2)

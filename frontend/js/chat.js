@@ -77,6 +77,15 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeChatId = null;
   let attachedFile = null;
   let chatService = null;
+  
+  // Expose functions for API integration to access active chat
+  window.getActiveChatId = () => activeChatId;
+  window.getActiveChat = () => {
+    return chats.find(c => c.id === activeChatId);
+  };
+  window.getChatById = (id) => {
+    return chats.find(c => c.id === id);
+  };
 
   // Initialize chat service
   console.log('[Chat] Initializing chat service...');
@@ -101,6 +110,16 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[Chat] User action: Creating new chat with title:', title);
     const titleText = title || `Chat ${chats.length + 1}`;
     
+    // Clear conversational agent session for fresh start
+    if (window.clearSession) {
+      window.clearSession();
+      console.log('[Chat] Cleared conversational agent session');
+    }
+    
+    // Clear any local storage chat messages for fresh start
+    localStorage.removeItem('api_chat_messages');
+    console.log('[Chat] Cleared local storage chat messages');
+    
     // If chatService is available, create chat in Supabase
     if (chatService) {
       console.log('[Chat] Using Supabase to create chat');
@@ -111,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const chat = {
           id: newChat.id,
           title: newChat.title,
-          messages: [],
+          messages: [], // Ensure messages array is empty
           created_at: newChat.created_at,
           updated_at: newChat.updated_at
         };
@@ -122,9 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
         renderChatList();
         console.log('[Chat] Chat list rendered after creation');
         
-        // Set the new chat as active
+        // Set the new chat as active - this will clear the messages display
+        activeChatId = chat.id;
         await setActiveChat(chat.id);
-        renderMessages();
+        renderMessages(); // This should show empty state
         
         console.log('[Chat] Chat creation completed successfully');
         return chat;
@@ -254,6 +274,13 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('[Chat] ChatService not available, using local messages');
     }
     
+    // Clear any localStorage chat messages when switching chats (to prevent cross-chat contamination)
+    const currentChat = chats.find(c => c.id === id);
+    if (currentChat && currentChat.messages.length === 0) {
+      localStorage.removeItem('api_chat_messages');
+      console.log('[Chat] Cleared localStorage messages for new/empty chat');
+    }
+    
     renderMessages();
     console.log('[Chat] Active chat set and messages rendered');
   }
@@ -312,8 +339,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
         if(m.text){
       const p = document.createElement('div');
+          // Clean up excessive blank lines first
+          let cleanedText = m.text
+            .replace(/\n{3,}/g, '\n\n')  // Replace 3+ newlines with 2
+            .replace(/^\n+|\n+$/g, ''); // Remove leading/trailing newlines
+          
           // Simple markdown-style formatting
-          let formattedText = m.text
+          let formattedText = cleanedText
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
             .replace(/^• (.+)$/gm, '<div style="padding-left:1em">• $1</div>') // Bullet points
             .replace(/^(\d+)\. (.+)$/gm, '<div style="padding-left:1em">$1. $2</div>') // Numbered lists
@@ -569,80 +601,13 @@ document.addEventListener('DOMContentLoaded', () => {
         thinkingMsg._steps[PROCESSING_STEPS.length - 1].status = 'completed';
         renderMessages();
 
-        // Small delay before showing final result
-    setTimeout(() => {
-          // Remove the thinking message
-      const idx = chat.messages.findIndex(m => m._thinking);
-      if(idx !== -1) chat.messages.splice(idx, 1);
-
-          // Fixed analysis for SN74AHC04N (TI logic inverter)
-          const confidence = 90;
-          const uncertainty = 10;
-          
-          const result = `**Quick Verdict**
-
-I identify this part as **SN74AHC04N** (TI logic inverter, 14-pin SOIC style). Based on multimodal checks I am **${confidence}% confident** this is authentic, with a **${uncertainty}% residual uncertainty** due to a local surface anomaly and slight OCR spacing variation.
-
-**Summary of Checks Performed**
-
-• Image enhancement and glare removal applied, SR crops produced for micro-text
-• OCR normalized text extracted: SN74AHC04N (high confidence)
-• Logo match against TI reference via Siamese embedding: similarity 0.89 (pass threshold)
-• Pin detection: 14 pins detected, rows parallel, pitch measured ≈ 1.27mm ± 0.03mm consistent with SOIC-14
-• Notch/pin-1 marker detected on short edge (orientation confirmed)
-• Package classification: SOIC-14 (geometry score 0.92)
-• Surface texture scan (LBP + Laws' + CNN fusion): mostly consistent with reference but a small localized roughness patch near the marking line detected (anomaly score 0.34)
-• Golden-IC embedding similarity (whole-device): 0.84 (good match, slightly below ideal lab-captured baseline)
-
-**Why ${confidence}% Confident**
-
-✓ Strong textual match to SN74AHC04N and consistent two-line marking layout
-✓ TI logo and overall package geometry closely match Golden IC references
-✓ Pin count, pitch, and notch presence all conform to datasheet constraints for SOIC-14
-✓ Multimodal fusion weights favor geometry, marking, and logo signals which are all positive
-
-**Remaining ${uncertainty}% Uncertainty**
-
-⚠ Localized surface roughness/sanding pattern beneath the marking could indicate post-manufacture rework or cleaning that affects marking clarity
-⚠ OCR spacing/kerning shows a minor deviation from a small subset of Golden prints (within relaxed photo tolerance but present)
-⚠ Whole-device embedding is slightly lower than best-case lab images, which could be due to lighting, lens angle, or subtle manufacturing variance
-
-**Fault Checks (electrical/physical)**
-
-✓ Visual pin geometry shows no missing or severely bent pins
-⚠ Pin continuity faults cannot be ruled out by imaging alone
-⚠ Surface anomaly is physical and merits closer inspection (possible sanding, re-etch, or residue) which can correlate with rework but not necessarily counterfeit
-
-**Recommended Next Actions**
-
-1. Run quick electrical tests: continuity on each pin and simple bench functional test of SN74AHC04 logic gates
-2. If still unsure, perform nondestructive internal inspection (X-ray or SEM) to confirm die marking, wire bonds, and internal package structure
-3. If highest assurance is required, destructive decapsulation and die-level comparison is definitive
-4. Optionally upload packaging/tape-reel label images or a top-down high-exposure shot to reduce the remaining uncertainty
-
-**Final Report Prepared**
-
-I have generated a detailed report bundle including SR-enhanced marking crop, logo match overlay, pin index & pitch map, texture anomaly heatmap, extracted datasheet snippet, and summary verdict logs.`;
-          
-          const botMessage = { role:'bot', text: result, time: Date.now(), _hasReport: true, _reportId: 'report_' + Date.now() };
-          chat.messages.push(botMessage);
-
-          // Save bot message to Supabase
-          if (chatService) {
-            try {
-              await chatService.saveMessage(activeChatId, 'assistant', result, null);
-            } catch (error) {
-              console.error('Error saving bot message:', error);
-            }
-          }
-
-          // Re-enable controls
-      if(sendBtn) sendBtn.disabled = false;
-      if(promptEl) promptEl.disabled = false;
-
-      renderMessages();
-      renderChatList();
-        }, 600);
+        // Note: Actual detection is handled by API integration
+        // This thinking message is just a visual indicator
+        // The API integration will replace this with real results
+        
+        // Re-enable controls (API integration will handle the actual response)
+        if(sendBtn) sendBtn.disabled = false;
+        if(promptEl) promptEl.disabled = false;
       }
     }
 
@@ -845,8 +810,11 @@ This report is generated for demonstration purposes.
 
   // Initialize: Load chats
   console.log('[Chat] Starting chat initialization...');
-  await loadChats();
-  console.log('[Chat] Chat initialization completed');
+  loadChats().then(() => {
+    console.log('[Chat] Chat initialization completed');
+  }).catch(err => {
+    console.error('[Chat] Error initializing chats:', err);
+  });
   
   // Final check: Verify button handler is attached
   const finalCheckBtn = document.getElementById('newChatBtn');

@@ -210,54 +210,61 @@ class DatasheetParser:
             return
         
         # Use PyMuPDF for better image quality
-        doc = fitz.open(self.pdf_path)
-        
-        # Filter pages by package type if specified
+        # Use context manager to ensure file is properly closed
         pages_to_extract = []
         
-        if self.target_package_type:
-            print(f"  🎯 Filtering for package type: {self.target_package_type}")
-            
-            for page_num in info.mechanical_pages:
-                page = doc[page_num - 1]
-                page_text = page.get_text().upper()
+        with fitz.open(self.pdf_path) as doc:
+            # Filter pages by package type if specified
+            if self.target_package_type:
+                print(f"  🎯 Filtering for package type: {self.target_package_type}")
                 
-                # Check if this page matches the target package
-                # Look for package designator (e.g., "D14", "PW14", "NS14")
-                # or package type name (e.g., "SOIC", "QFN")
-                if self._is_matching_package(page_text, self.target_package_type, self.target_pin_count):
-                    pages_to_extract.append(page_num)
-                    print(f"  ✓ Match found on page {page_num}")
-            
-            if not pages_to_extract:
-                print(f"  ⚠️  No pages found for {self.target_package_type}, extracting ALL mechanical pages for scoring")
+                for page_num in info.mechanical_pages:
+                    try:
+                        page = doc[page_num - 1]
+                        page_text = page.get_text().upper()
+                        
+                        # Check if this page matches the target package
+                        # Look for package designator (e.g., "D14", "PW14", "NS14")
+                        # or package type name (e.g., "SOIC", "QFN")
+                        if self._is_matching_package(page_text, self.target_package_type, self.target_pin_count):
+                            pages_to_extract.append(page_num)
+                            print(f"  ✓ Match found on page {page_num}")
+                    except Exception as e:
+                        print(f"  ⚠️  Error checking page {page_num}: {e}")
+                        continue
+                
+                if not pages_to_extract:
+                    print(f"  ⚠️  No pages found for {self.target_package_type}, extracting ALL mechanical pages for scoring")
+                    pages_to_extract = info.mechanical_pages
+            else:
                 pages_to_extract = info.mechanical_pages
-        else:
-            pages_to_extract = info.mechanical_pages
-        
-        # Extract the selected pages
-        for page_num in pages_to_extract:
-            try:
-                page = doc[page_num - 1]  # PyMuPDF is 0-indexed
-                
-                # Render page to image at high resolution
-                zoom = 2.0  # 2x zoom for better quality
-                mat = fitz.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
-                
-                # Save as PNG
-                package_suffix = f"_{self.target_package_type}" if self.target_package_type else ""
-                output_filename = f"{self.pdf_path.stem}_mechanical{package_suffix}_page{page_num}.png"
-                output_path = self.output_dir / output_filename
-                pix.save(output_path)
-                
-                info.mechanical_diagrams.append(str(output_path))
-                print(f"  ✓ Saved: {output_filename} ({pix.width}x{pix.height}px)")
-                
-            except Exception as e:
-                print(f"  ✗ Failed to extract page {page_num}: {e}")
-        
-        doc.close()
+            
+            # Extract the selected pages
+            for page_num in pages_to_extract:
+                try:
+                    page = doc[page_num - 1]  # PyMuPDF is 0-indexed
+                    
+                    # Render page to image at high resolution
+                    zoom = 2.0  # 2x zoom for better quality
+                    mat = fitz.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat)
+                    
+                    # Save as PNG
+                    package_suffix = f"_{self.target_package_type}" if self.target_package_type else ""
+                    output_filename = f"{self.pdf_path.stem}_mechanical{package_suffix}_page{page_num}.png"
+                    output_path = self.output_dir / output_filename
+                    pix.save(str(output_path))
+                    
+                    info.mechanical_diagrams.append(str(output_path))
+                    print(f"  ✓ Saved: {output_filename} ({pix.width}x{pix.height}px)")
+                    
+                    # Clean up pixmap
+                    pix = None
+                    
+                except Exception as e:
+                    print(f"  ✗ Failed to extract page {page_num}: {e}")
+                    import traceback
+                    traceback.print_exc()
         
         # Return the first extracted page number (for dimension parsing)
         return pages_to_extract[0] if pages_to_extract else None
@@ -468,15 +475,39 @@ class DatasheetParser:
                 if not text:
                     continue
                 
-                # Extract manufacturer
+                # Extract manufacturer ONLY if not already set (from Gemini identification)
+                # This prevents incorrect extraction (e.g., "Maxim" mentioned in cross-references)
+                # Gemini's identification is more reliable than text extraction
                 if not info.manufacturer:
+                    # Only extract if Gemini didn't provide it
                     manufacturers = ['Texas Instruments', 'Analog Devices', 'Microchip', 
                                    'STMicroelectronics', 'NXP', 'Infineon', 'Renesas',
-                                   'ON Semiconductor', 'Maxim', 'Intel', 'AMD']
+                                   'ON Semiconductor', 'Maxim Integrated', 'Maxim', 'Intel', 'AMD',
+                                   'Atmel', 'Fairchild', 'National Semiconductor']
+                    
+                    # Look for manufacturer in title/header area (first 500 chars) for better accuracy
+                    header_text = text[:500].lower()
                     for mfg in manufacturers:
-                        if mfg.lower() in text.lower():
-                            info.manufacturer = mfg
-                            break
+                        mfg_lower = mfg.lower()
+                        # Check if manufacturer appears in header (more reliable)
+                        if mfg_lower in header_text:
+                            # Additional check: make sure it's not just a mention in a list
+                            # Look for patterns like "Manufacturer: X" or "© X" or "X Corporation"
+                            patterns = [
+                                rf'\b{mfg_lower}\b',  # Word boundary match
+                                rf'©\s*{mfg_lower}',  # Copyright
+                                rf'{mfg_lower}\s+(?:corporation|inc|ltd|semiconductor)',  # Company suffix
+                            ]
+                            for pattern in patterns:
+                                if re.search(pattern, header_text, re.IGNORECASE):
+                                    info.manufacturer = mfg
+                                    print(f"  ✓ Extracted manufacturer from PDF: {mfg}")
+                                    break
+                            if info.manufacturer:
+                                break
+                elif info.manufacturer:
+                    # Manufacturer already set from Gemini - use it and don't overwrite
+                    print(f"  ✓ Using manufacturer from Gemini identification: {info.manufacturer}")
                 
                 # Extract description (usually in first page)
                 if not info.description and page_num == 0:

@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analyse ICs - AuthentIC</title>
+  <link rel="stylesheet" href="css/chat.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <style>
+    /* Analyse ICs Page - Split Pane Layout */
+    .analyse-page {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    .analyse-left-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+      width: 100%;
+      min-width: 0;
+    }
+    
+    .analyse-right-pane {
+      width: 50%;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    
+    .analyse-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .analyse-header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    
+    .analyse-content {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 20px;
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+    
+    .analyse-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+      min-width: 0;
+    }
+    
+    .form-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+    }
+    
+    .form-label {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    
+    .image-upload-area {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+    }
+    
+    button.upload-btn,
+    .upload-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--panel);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text);
+      transition: all 0.2s;
+      font-size: 0.95rem;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      box-sizing: border-box !important;
+      flex-shrink: 0;
+      margin: 0;
+    }
+    
+    .image-upload-area .upload-btn {
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    
+    .upload-btn:hover {
+      border-color: var(--accent);
+      background: var(--bg);
+    }
+    
+    .image-previews-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+      width: 100%;
+    }
+    
+    .image-preview-item {
+      position: relative;
+      aspect-ratio: 1;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+    
+    .image-preview-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: var(--panel);
+    }
+    
+    .remove-image-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      background: rgba(0, 0, 0, 0.75);
+      border: none;
+      border-radius: 50%;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    
+    .remove-image-btn:hover {
+      background: rgba(239, 68, 68, 0.9);
+    }
+    
+    .form-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.95rem;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    
+    .form-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(118, 185, 0, 0.1);
+    }
+    
+    .pdf-upload-area {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+    }
+    
+    .pdf-upload-area .upload-btn {
+      flex: 1;
+      min-width: 0;
+      width: auto;
+    }
+    
+    .remove-file-btn {
+      padding: 8px 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    
+    .remove-file-btn:hover {
+      background: var(--bg);
+      border-color: var(--accent);
+    }
+    
+    .form-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    
+    .btn-submit {
+      padding: 12px 24px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+    }
+    
+    .btn-submit:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+    
+    .btn-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    /* Process Chain */
+    .analyse-process-chain {
+      margin-top: 24px;
+      padding: 16px;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: none;
+    }
+    
+    .analyse-process-chain.active {
+      display: block;
+    }
+    
+    .process-step {
+      display: flex;
+      gap: 12px;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: var(--panel);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    
+    .step-indicator {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: var(--accent);
+    }
+    
+    .step-content {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .step-title {
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      font-size: 0.95rem;
+    }
+    
+    .step-message {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    
+    .process-loading {
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+    }
+    
+    .process-error {
+      text-align: center;
+      padding: 20px;
+      color: #ef4444;
+    }
+    
+    /* PDF Viewer */
+    .pdf-viewer-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      position: relative;
+      min-height: 0;
+    }
+    
+    .pdf-viewer-placeholder {
+      text-align: center;
+      color: var(--muted);
+      padding: 40px;
+    }
+    
+    .pdf-viewer-placeholder svg {
+      margin-bottom: 12px;
+      opacity: 0.3;
+    }
+    
+    .pdf-viewer-placeholder p {
+      margin: 0;
+      font-size: 0.9rem;
+    }
+    
+    #pdfViewer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    
+    .back-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+      text-decoration: none;
+    }
+    
+    .back-btn:hover {
+      background: var(--bg);
+      border-color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="analyse-page">
+    <!-- Left Pane: Input + Process Chain -->
+    <div class="analyse-left-pane">
+      <div class="analyse-header">
+        <h2>Analyse ICs</h2>
+        <a href="dashboard.html" class="back-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Back to Dashboard
+        </a>
+      </div>
+      
+      <div class="analyse-content">
+        <form id="analyseIcsForm" class="analyse-form">
+          <div class="form-section">
+            <label class="form-label">IC Image(s) *</label>
+            <div class="image-upload-area">
+              <input type="file" id="analyseImageInput" accept="image/*" multiple style="display: none;">
+              <button type="button" class="upload-btn" onclick="document.getElementById('analyseImageInput').click()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Upload Image(s)</span>
+              </button>
+              <div id="analyseImagePreviews" class="image-previews-grid"></div>
+            </div>
+          </div>
+          
+          <div class="form-section">
+            <label class="form-label">Additional Information (Optional)</label>
+            <textarea id="analyseInfoInput" class="form-textarea" placeholder="Enter any additional information about the IC, markings, or context..."></textarea>
+          </div>
+          
+          <div class="form-section">
+            <label class="form-label">OEM PDF Datasheet (Optional)</label>
+            <div class="pdf-upload-area">
+              <input type="file" id="analysePdfInput" accept=".pdf" style="display: none;">
+              <button type="button" class="upload-btn" onclick="document.getElementById('analysePdfInput').click()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+                <span id="analysePdfFileName">Upload PDF</span>
+              </button>
+              <button type="button" id="removeAnalysePdfBtn" class="remove-file-btn" style="display: none;" onclick="removeAnalysePdf()">Remove</button>
+            </div>
+          </div>
+          
+          <div class="form-actions">
+            <button type="submit" class="btn-submit" id="analyseSubmitBtn">Analyse ICs</button>
+          </div>
+        </form>
+        
+        <!-- Process Chain (shown during/after analysis) -->
+        <div class="analyse-process-chain" id="analyseProcessChain">
+          <!-- Process chain will be rendered here -->
+        </div>
+      </div>
+    </div>
+    
+    <!-- Right Pane: PDF Viewer -->
+    <div class="analyse-right-pane">
+      <div class="analyse-header">
+        <h2>OEM Datasheet</h2>
+      </div>
+      <div class="pdf-viewer-container" id="pdfViewerContainer">
+        <div class="pdf-viewer-placeholder">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          <p>OEM datasheet will appear here</p>
+        </div>
+        <iframe id="pdfViewer" style="display: none;"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api-client.js"></script>
+  <script src="js/analyse-ics.js"></script>
+</body>
+</html>
+

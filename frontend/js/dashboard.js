@@ -1,16 +1,65 @@
 // dashboard.js — simplified: animate bar fills only
 // Check if user is logged in using Supabase
 
+// Helper function to get redirect URL based on user type
+function getRedirectUrl() {
+  const userType = localStorage.getItem('authentIC_userType');
+  return userType === 'personal' ? 'query.html' : 'dashboard.html';
+}
+
 // Load Supabase config first
 async function checkAuth() {
+  // Check user type - redirect personal users to chat interface
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'personal') {
+    window.location.href = 'query.html';
+    return false;
+  }
+  
   // Check Supabase session if available
   if (typeof supabase !== 'undefined') {
+    // Check for OAuth callback in URL hash first
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      // OAuth callback - wait a moment for Supabase to process
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     const { data: { session }, error } = await supabase.auth.getSession();
-    if (!session) {
+    if (session) {
+      // Check user type again after session is established
+      const currentUserType = localStorage.getItem('authentIC_userType');
+      if (currentUserType === 'personal') {
+        window.location.href = 'query.html';
+        return false;
+      }
+      
+      // Clear OAuth pending flag and set logged in
+      localStorage.removeItem('authentIC_pendingOAuth');
+      localStorage.setItem('authentIC_loggedIn', 'true');
+      // Clear hash if present
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      return true;
+    } else {
+      // Check if we're waiting for OAuth (don't redirect immediately)
+      const pendingOAuth = localStorage.getItem('authentIC_pendingOAuth');
+      if (!pendingOAuth) {
+        window.location.href = 'login.html';
+        return false;
+      }
+      // OAuth pending - wait a bit more
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { data: { session: retrySession } } = await supabase.auth.getSession();
+      if (retrySession) {
+        localStorage.removeItem('authentIC_pendingOAuth');
+        localStorage.setItem('authentIC_loggedIn', 'true');
+        return true;
+      }
       window.location.href = 'login.html';
       return false;
     }
-    return true;
   } else {
     // Fallback to localStorage check
     const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
@@ -334,8 +383,11 @@ checkAuth().then((isAuthenticated) => {
     // Setup logout handler
     setupLogout();
     
-    // Load and render chats from Supabase
-    await loadAndRenderChats();
+    // Only load chats for personal users (business users use Analyse ICs instead)
+    const userType = localStorage.getItem('authentIC_userType');
+    if (userType !== 'business') {
+      await loadAndRenderChats();
+    }
     
     // animate bar fills (reads inline style width)
     document.querySelectorAll('.bar-fill').forEach((el) => {
@@ -344,22 +396,8 @@ checkAuth().then((isAuthenticated) => {
       setTimeout(() => { el.style.width = w; }, 80);
     });
     
-    // Handle new chat button navigation
-    const newChatBtn = document.getElementById('newChatBtn');
-    if (newChatBtn) {
-      console.log('[Dashboard] Setting up New Chat button handler');
-      newChatBtn.addEventListener('click', function(e) {
-        console.log('[Dashboard] User action: New Chat button clicked');
-        e.preventDefault();
-        e.stopPropagation();
-        // Add a parameter to indicate new chat request
-        console.log('[Dashboard] Navigating to query.html?new=true');
-        window.location.href = 'query.html?new=true';
-      }, true);
-      console.log('[Dashboard] New Chat button handler set up');
-    } else {
-      console.error('[Dashboard] New Chat button not found!');
-    }
+    // Note: New Chat button removed for business users - replaced with Analyse ICs
+    // Analyse ICs functionality is handled by dashboard-query.js
   });
 });
 
@@ -368,10 +406,18 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setupLogout();
     setupLanguageDropdown();
-    setupSearchOverlay();
+    // Only setup search overlay for personal users (business users don't have chats)
+    const userType = localStorage.getItem('authentIC_userType');
+    if (userType !== 'business') {
+      setupSearchOverlay();
+    }
   });
 } else {
   setupLogout();
   setupLanguageDropdown();
-  setupSearchOverlay();
+  // Only setup search overlay for personal users (business users don't have chats)
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType !== 'business') {
+    setupSearchOverlay();
+  }
 }

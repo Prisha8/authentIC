@@ -41,6 +41,68 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Handle OAuth redirects and navigation
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      // Check if this is an OAuth callback with access_token in hash
+      if (navigationUrl.includes('#access_token') || navigationUrl.includes('#error')) {
+        event.preventDefault();
+        
+        // Extract hash from URL
+        const hashIndex = navigationUrl.indexOf('#');
+        const hash = hashIndex !== -1 ? navigationUrl.substring(hashIndex) : '';
+        
+        // Route to query.html first (for personal users), it will redirect to dashboard if needed
+        // Both pages have OAuth callback handlers that check user type
+        mainWindow.loadFile('frontend/query.html').then(() => {
+          // Inject the hash into the page so Supabase can process it
+          setTimeout(() => {
+            if (hash) {
+              mainWindow.webContents.executeJavaScript(`
+                window.location.hash = ${JSON.stringify(hash)};
+              `);
+            }
+          }, 200);
+        });
+        return;
+      }
+      
+      // Prevent navigation to localhost:3000 or other invalid URLs in Electron
+      if (navigationUrl.startsWith('http://localhost:') || navigationUrl.startsWith('http://127.0.0.1:')) {
+        event.preventDefault();
+        console.log('[Electron] Blocked navigation to:', navigationUrl);
+        // Check if it's an OAuth callback
+        if (navigationUrl.includes('#access_token')) {
+          const hashIndex = navigationUrl.indexOf('#');
+          const hash = hashIndex !== -1 ? navigationUrl.substring(hashIndex) : '';
+          // Route to query.html, it will handle user type routing
+          mainWindow.loadFile('frontend/query.html').then(() => {
+            setTimeout(() => {
+              if (hash) {
+                mainWindow.webContents.executeJavaScript(`
+                  window.location.hash = ${JSON.stringify(hash)};
+                `);
+              }
+            }, 200);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Electron] Navigation handler error:', err);
+    }
+  });
+
+  // Handle new window opens (for OAuth popup/redirect)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Allow Supabase OAuth and Google OAuth to open in same window
+    if (url.includes('supabase.co/auth') || url.includes('accounts.google.com') || url.includes('oauth')) {
+      // Open in same window
+      mainWindow.loadURL(url);
+      return { action: 'deny' }; // Deny new window, we'll handle it above
+    }
+    return { action: 'deny' };
+  });
+
   // Create custom menu
   const template = [
     {

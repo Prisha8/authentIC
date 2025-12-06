@@ -1,15 +1,83 @@
 // chat.js — chat UI + collapsible sidebar + Save Chat behavior
 // Check if user is logged in using Supabase
 
+// Setup logout handler immediately (before auth check)
+function setupLogout() {
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    // Remove any existing listeners to avoid duplicates
+    const newLogoutBtn = logoutBtn.cloneNode(true);
+    logoutBtn.parentNode.replaceChild(newLogoutBtn, logoutBtn);
+    
+    newLogoutBtn.addEventListener('click', async () => {
+      try {
+        console.log('[Chat] Logout clicked');
+        // Sign out from Supabase if available
+        if (typeof supabase !== 'undefined') {
+          await supabase.auth.signOut();
+        }
+        // Clear localStorage
+        localStorage.removeItem('authentIC_loggedIn');
+        localStorage.removeItem('authentIC_userType');
+        localStorage.removeItem('authentIC_companyId');
+        localStorage.removeItem('authentIC_pendingOAuth');
+        // Redirect to login
+        window.location.href = 'login.html';
+      } catch (error) {
+        console.error('[Chat] Logout error:', error);
+        // Still redirect even if there's an error
+        localStorage.clear();
+        window.location.href = 'login.html';
+      }
+    });
+    console.log('[Chat] Logout handler attached');
+  } else {
+    console.warn('[Chat] Logout button not found');
+  }
+}
+
 // Load Supabase config first
 async function checkAuth() {
+  // Check user type - redirect business users to dashboard
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'business') {
+    window.location.href = 'dashboard.html';
+    return false;
+  }
+  
   // Check Supabase session if available
   if (typeof supabase !== 'undefined') {
+    // Check for OAuth callback in URL hash first
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      // OAuth callback - wait a moment for Supabase to process
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     const { data: { session }, error } = await supabase.auth.getSession();
     if (!session) {
-      window.location.href = 'login.html';
+      // Check if we're waiting for OAuth (don't redirect immediately)
+      const pendingOAuth = localStorage.getItem('authentIC_pendingOAuth');
+      if (!pendingOAuth) {
+        window.location.href = 'login.html';
+        return false;
+      }
+      // OAuth pending - wait a bit more
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { data: { session: retrySession } } = await supabase.auth.getSession();
+      if (!retrySession) {
+        window.location.href = 'login.html';
+        return false;
+      }
+    }
+    
+    // Check user type again after session is established
+    const currentUserType = localStorage.getItem('authentIC_userType');
+    if (currentUserType === 'business') {
+      window.location.href = 'dashboard.html';
       return false;
     }
+    
     return true;
   } else {
     // Fallback to localStorage check
@@ -18,7 +86,44 @@ async function checkAuth() {
       window.location.href = 'login.html';
       return false;
     }
+    
+    // Check user type for fallback too
+    const currentUserType = localStorage.getItem('authentIC_userType');
+    if (currentUserType === 'business') {
+      window.location.href = 'dashboard.html';
+      return false;
+    }
+    
     return true;
+  }
+}
+
+// Setup logout handler immediately (before auth check)
+// Try to set it up right away if DOM is ready, otherwise wait for DOMContentLoaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupLogout);
+} else {
+  setupLogout();
+}
+
+// Also set up after a short delay to ensure button exists
+setTimeout(setupLogout, 100);
+
+// Initialize sidebar visibility immediately (don't wait for auth)
+// This ensures the sidebar is visible even if there are auth delays
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+      sidebar.classList.remove('collapsed');
+      console.log('[Chat] Sidebar initialized and made visible');
+    }
+  });
+} else {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) {
+    sidebar.classList.remove('collapsed');
+    console.log('[Chat] Sidebar initialized and made visible');
   }
 }
 
@@ -641,21 +746,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   
-  // Handle logout
-  const logoutBtn = document.getElementById('logoutBtn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
-      // Sign out from Supabase if available
-      if (typeof supabase !== 'undefined') {
-        await supabase.auth.signOut();
-      }
-      // Clear localStorage
-      localStorage.removeItem('authentIC_loggedIn');
-      localStorage.removeItem('authentIC_userType');
-      localStorage.removeItem('authentIC_companyId');
-      window.location.href = 'login.html';
-    });
-  }
+  // Ensure logout handler is attached (already set up earlier, but ensure it's there)
+  setupLogout();
 
   // helper to escape html
   function escapeHtml(str){
@@ -870,6 +962,14 @@ window.handleNewChatClick = async function(e) {
   if (e) {
     e.preventDefault();
     e.stopPropagation();
+  }
+  
+  // Check user type - business users should not access chat interface
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'business') {
+    console.log('[Chat] Business user detected, redirecting to dashboard');
+    window.location.href = 'dashboard.html';
+    return;
   }
   
   // Check if we're on query page

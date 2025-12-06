@@ -97,10 +97,6 @@
             <span data-i18n="nav.newChat" style="pointer-events: none;">New Chat</span>
           </button>
 
-          <a class="menu-item" href="dashboard.html">
-            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
-            <span data-i18n="nav.dashboard">Dashboard</span>
-          </a>
 
           <button class="menu-item" id="searchChatsBtn" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5A6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 20.5L21.5 19l-6-5z" fill="currentColor"/></svg>
@@ -199,6 +195,70 @@
   <script src="js/api-client.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/chat-api-integration.js"></script>
+  <script>
+    // Handle OAuth callback from Google for personal users
+    (async () => {
+      if (typeof supabase === 'undefined') return;
+      
+      // Check for OAuth tokens in URL hash
+      const hash = window.location.hash;
+      if (hash && (hash.includes('access_token') || hash.includes('error'))) {
+        try {
+          console.log('[Chat] OAuth callback detected, processing...');
+          
+          // Wait for Supabase to process the session
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          const { data: { session }, error } = await supabase.auth.getSession();
+          
+          if (session) {
+            console.log('[Chat] OAuth session established successfully');
+            // Success - clear hash and set logged in flag
+            localStorage.setItem('authentIC_loggedIn', 'true');
+            localStorage.removeItem('authentIC_pendingOAuth');
+            
+            // Ensure user type is set to personal
+            if (!localStorage.getItem('authentIC_userType')) {
+              localStorage.setItem('authentIC_userType', 'personal');
+            }
+            
+            // Clear hash from URL
+            if (window.location.hash) {
+              window.history.replaceState(null, '', window.location.pathname);
+            }
+            
+            // Reload to show chat interface
+            window.location.reload();
+          } else if (error) {
+            console.error('[Chat] OAuth session error:', error);
+            alert('Login failed: ' + (error.message || 'Unknown error'));
+            window.location.href = 'login.html';
+          } else {
+            // No session and no error - might need to wait longer
+            console.log('[Chat] Waiting for session...');
+            setTimeout(async () => {
+              const { data: { session: retrySession } } = await supabase.auth.getSession();
+              if (retrySession) {
+                localStorage.setItem('authentIC_loggedIn', 'true');
+                localStorage.removeItem('authentIC_pendingOAuth');
+                if (!localStorage.getItem('authentIC_userType')) {
+                  localStorage.setItem('authentIC_userType', 'personal');
+                }
+                window.history.replaceState(null, '', window.location.pathname);
+                window.location.reload();
+              } else {
+                console.error('[Chat] No session after retry');
+                window.location.href = 'login.html';
+              }
+            }, 1000);
+          }
+        } catch (err) {
+          console.error('[Chat] OAuth callback error:', err);
+          window.location.href = 'login.html';
+        }
+      }
+    })();
+  </script>
 </body>
 
 </html>

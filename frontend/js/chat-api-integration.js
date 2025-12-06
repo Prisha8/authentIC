@@ -594,22 +594,47 @@ console.log('===========================================');
       const chatCard = document.createElement('div');
       chatCard.className = 'chat-card';
       
+      // First, deduplicate messages with same sessionId, resultIndex, and _hasReport
+      const seenSummaryKeys = new Set();
+      const deduplicatedMessages = chat.messages.filter(msg => {
+        if (msg._sessionId && msg._hasReport) {
+          const key = `${msg._sessionId}_${msg._resultIndex || 0}`;
+          if (seenSummaryKeys.has(key)) {
+            console.log(`[API Integration] Filtering duplicate summary message during render: ${key}`);
+            return false; // Duplicate
+          }
+          seenSummaryKeys.add(key);
+        }
+        return true;
+      });
+      
       // Filter out messages without content (cleanup)
       // Also filter out completed process chains - they're replaced by conversational summary
-      const validMessages = chat.messages.filter(msg => {
+      const validMessages = deduplicatedMessages.filter(msg => {
         if (!msg.text && !msg.img && !msg._processChain && !msg._hasReport) {
           return false;
         }
-        // Hide completed process chains - conversational summary replaces them
+        // For completed process chains, check if they should be shown or hidden
+        // (controlled by toggle state - default hidden, shown when arrow is clicked)
         if (msg._processChain && msg._completed) {
-          return false;
+          // Show if explicitly marked to show, otherwise hide (summary replaces it)
+          return msg._showProcessChain === true;
         }
         return true;
       });
       
       for (const msg of validMessages) {
+        // Skip summary message if process chain is being shown
+        if (msg._hasReport && msg._processChainId) {
+          const processChainMsg = chat.messages.find(m => m._processChain && m._sessionId === msg._sessionId);
+          if (processChainMsg && processChainMsg._showProcessChain === true) {
+            continue; // Skip summary, show process chain instead
+          }
+        }
+        
         const msgDiv = document.createElement('div');
         msgDiv.className = 'msg ' + (msg.role === 'user' ? 'user' : 'bot');
+        msgDiv.dataset.msgTime = msg.time; // Store time for navigation
         
         if (msg.img) {
           // Only render data URLs (blob URLs don't work in Electron)
@@ -770,40 +795,64 @@ console.log('===========================================');
           chainContainer.appendChild(chainContent);
           msgDiv.appendChild(chainContainer);
           chatCard.appendChild(msgDiv);
+          
+          // Add navigation controls below the container (for process chain view)
+          if (msg._completed) {
+            const navContainer = document.createElement('div');
+            navContainer.className = 'view-navigator';
+            
+            // 1/2 = Process Chain, 2/2 = Summary
+            const currentView = 1; // We're on the process chain view
+            
+            // Previous button (disabled - already on view 1)
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'nav-btn nav-prev';
+            prevBtn.disabled = true;
+            prevBtn.innerHTML = `
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            `;
+            
+            // View indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'nav-indicator';
+            indicator.textContent = '1/2';
+            
+            // Next button (go to Summary - view 2)
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'nav-btn nav-next';
+            nextBtn.disabled = false;
+            nextBtn.innerHTML = `
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            `;
+            nextBtn.onclick = (e) => {
+              e.stopPropagation();
+              msg._showProcessChain = false;
+              renderMessagesFallback(chat, messagesEl);
+              setTimeout(() => {
+                const summaryMsg = chat.messages.find(m => m._hasReport && m._sessionId === msg._sessionId);
+                if (summaryMsg) {
+                  const summaryElement = document.querySelector(`[data-msg-time="${summaryMsg.time}"]`);
+                  if (summaryElement) {
+                    summaryElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }
+              }, 100);
+            };
+            
+            navContainer.appendChild(prevBtn);
+            navContainer.appendChild(indicator);
+            navContainer.appendChild(nextBtn);
+            chatCard.appendChild(navContainer);
+          }
+          
           continue;
         }
         
-        // Add navigation arrow to switch to process chain view if available (at the top)
-        if (msg._hasReport && msg._processChainId) {
-          const navBtn = document.createElement('button');
-          navBtn.className = 'process-chain-nav-btn';
-          navBtn.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 18 9 12 15 6"></polyline>
-            </svg>
-            <span>View Process Breakdown</span>
-          `;
-          navBtn.onclick = (e) => {
-            e.stopPropagation();
-            // Find and expand the process chain message by session ID
-            const processChainMsg = chat.messages.find(m => m._processChain && m._sessionId === msg._sessionId);
-            if (processChainMsg) {
-              processChainMsg._collapsed = false;
-              // Re-render messages to show expanded chain
-              renderMessagesFallback(chat, messagesEl);
-              // Scroll to process chain after a short delay to ensure it's rendered
-              setTimeout(() => {
-                const chainElement = document.querySelector(`[data-chain-time="${processChainMsg.time}"]`);
-                if (chainElement) {
-                  chainElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  // Also expand the chain content
-                  chainElement.classList.remove('collapsed');
-                }
-              }, 200);
-            }
-          };
-          msgDiv.appendChild(navBtn);
-        }
+        // Navigation will be added below the container, not inside
         
         if (msg.text) {
           const textDiv = document.createElement('div');
@@ -830,15 +879,111 @@ console.log('===========================================');
           btn.style.border = 'none';
           btn.style.borderRadius = '4px';
           btn.style.cursor = 'pointer';
-          btn.onclick = () => {
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
             if (msg._sessionId) {
-              window.icDetectionAPI.downloadReport(msg._sessionId);
+              try {
+                console.log('[API Integration] Downloading report for session:', msg._sessionId, 'index:', msg._resultIndex || 0);
+                // Use the downloadReport method which opens the URL
+                const reportUrl = window.icDetectionAPI.getReportURL(msg._sessionId);
+                console.log('[API Integration] Report URL:', reportUrl);
+                // Open in new tab/window
+                const newWindow = window.open(reportUrl, '_blank');
+                if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                  // If popup blocked, try direct download via link
+                  const link = document.createElement('a');
+                  link.href = reportUrl;
+                  link.download = `detection_report_${msg._sessionId}.pdf`;
+                  link.target = '_blank';
+                  document.body.appendChild(link);
+                  link.click();
+                  setTimeout(() => {
+                    document.body.removeChild(link);
+                  }, 100);
+                }
+              } catch (error) {
+                console.error('[API Integration] Download error:', error);
+                alert('Failed to download report. Please try again.');
+              }
+            } else {
+              alert('Report not available - no session ID found');
             }
           };
           msgDiv.appendChild(btn);
         }
         
         chatCard.appendChild(msgDiv);
+        
+        // Add navigation controls below the container (for summary view - navigate back to process chain)
+        if (msg._hasReport && msg._processChainId) {
+          const navContainer = document.createElement('div');
+          navContainer.className = 'view-navigator';
+          
+          // Check current state - 1/2 = Process Chain, 2/2 = Summary
+          const processChainMsg = chat.messages.find(m => m._processChain && m._sessionId === msg._sessionId);
+          const isShowingChain = processChainMsg && processChainMsg._showProcessChain === true;
+          const currentView = isShowingChain ? 1 : 2; // 1 = Process Chain, 2 = Summary
+          
+          // Previous button (go to Process Chain - view 1)
+          const prevBtn = document.createElement('button');
+          prevBtn.className = 'nav-btn nav-prev';
+          prevBtn.disabled = currentView === 1;
+          prevBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          `;
+          prevBtn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (processChainMsg && currentView !== 1) {
+              processChainMsg._showProcessChain = true;
+              renderMessagesFallback(chat, messagesEl);
+              setTimeout(() => {
+                const chainElement = document.querySelector(`[data-chain-time="${processChainMsg.time}"]`);
+                if (chainElement) {
+                  chainElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  chainElement.classList.remove('collapsed');
+                }
+              }, 100);
+            }
+          };
+          
+          // View indicator
+          const indicator = document.createElement('div');
+          indicator.className = 'nav-indicator';
+          indicator.textContent = `${currentView}/2`;
+          
+          // Next button (go to Summary - view 2, disabled when on summary)
+          const nextBtn = document.createElement('button');
+          nextBtn.className = 'nav-btn nav-next';
+          nextBtn.disabled = currentView === 2;
+          nextBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          `;
+          nextBtn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (processChainMsg && currentView !== 2) {
+              processChainMsg._showProcessChain = false;
+              renderMessagesFallback(chat, messagesEl);
+              setTimeout(() => {
+                const summaryElement = document.querySelector(`[data-msg-time="${msg.time}"]`);
+                if (summaryElement) {
+                  summaryElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }, 100);
+            }
+          };
+          
+          navContainer.appendChild(prevBtn);
+          navContainer.appendChild(indicator);
+          navContainer.appendChild(nextBtn);
+          chatCard.appendChild(navContainer);
+        }
       }
       
       container.appendChild(chatCard);
@@ -941,9 +1086,15 @@ console.log('===========================================');
                 console.log(`[API Integration] Updated step ${update.step}:`, stepUpdate);
               } else if (update.type === 'complete') {
                 clearInterval(pollInterval);
-                console.log('[API Integration] Detection complete, fetching final results...');
-                // Get final results
-                fetchFinalResults(sessionId, processChainMsg, chat, messagesEl);
+                console.log('[API Integration] Detection complete, checking for existing summaries...');
+                // Check if summary already exists before fetching
+                const existingSummaries = chat.messages.filter(m => m._sessionId === sessionId && m._hasReport);
+                if (existingSummaries.length === 0) {
+                  console.log('[API Integration] No summaries found, fetching final results...');
+                  fetchFinalResults(sessionId, processChainMsg, chat, messagesEl);
+                } else {
+                  console.log(`[API Integration] Found ${existingSummaries.length} existing summary(ies), skipping fetchFinalResults`);
+                }
                 return;
               } else if (update.type === 'error') {
                 clearInterval(pollInterval);
@@ -1225,41 +1376,142 @@ console.log('===========================================');
           outputDiv.appendChild(summaryDiv);
         }
         
-        // Handle parse step - show diagram image and PDF download
+        // Handle parse step - show diagram image, dimensions table, and PDF download
         else if (stepKey === 'parse' && stepOutput) {
+          // Create a container for diagram and dimensions side-by-side
+          const contentContainer = document.createElement('div');
+          contentContainer.style.display = 'flex';
+          contentContainer.style.gap = '20px';
+          contentContainer.style.marginTop = '12px';
+          contentContainer.style.flexWrap = 'wrap';
+          
+          // Left side: Mechanical Diagram
           if (stepOutput.mechanical_diagram) {
             const diagramDiv = document.createElement('div');
-            diagramDiv.style.marginTop = '12px';
+            diagramDiv.style.flex = '1';
+            diagramDiv.style.minWidth = '300px';
             diagramDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Extracted Mechanical Diagram:</strong>';
             const img = document.createElement('img');
             // Convert relative path to absolute URL if needed
             const diagramPath = stepOutput.mechanical_diagram;
-            img.src = diagramPath.startsWith('http') ? diagramPath : `http://localhost:5001/api/download?file=${encodeURIComponent(diagramPath)}`;
+            // Use /api/download endpoint for all images
+            const cleanPath = diagramPath.replace(/^.*api_results[\/\\]/, '');
+            img.src = diagramPath.startsWith('http') ? diagramPath : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
             img.style.maxWidth = '100%';
             img.style.height = 'auto';
             img.style.borderRadius = '6px';
             img.style.marginTop = '8px';
             img.style.border = '1px solid var(--border)';
+            img.onerror = function() {
+              console.error('[API Integration] Failed to load diagram image:', diagramPath);
+              this.style.display = 'none';
+            };
             diagramDiv.appendChild(img);
-            outputDiv.appendChild(diagramDiv);
+            contentContainer.appendChild(diagramDiv);
           }
           
+          // Right side: Dimensions Table and Download
+          const rightSideDiv = document.createElement('div');
+          rightSideDiv.style.flex = '1';
+          rightSideDiv.style.minWidth = '300px';
+          
+          // Extract dimensions from parsed_specs or stepOutput
+          const packageDims = stepOutput.package_dimensions || 
+                             (stepOutput.parsed_specs && stepOutput.parsed_specs.package_dimensions) ||
+                             {};
+          
+          // Dimensions Table
+          if (packageDims && Object.keys(packageDims).length > 0) {
+            const dimsDiv = document.createElement('div');
+            dimsDiv.style.marginBottom = '20px';
+            dimsDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Extracted Dimensions:</strong>';
+            
+            const dimsTable = document.createElement('table');
+            dimsTable.className = 'json-table';
+            dimsTable.style.width = '100%';
+            dimsTable.style.marginTop = '8px';
+            
+            const tbody = document.createElement('tbody');
+            
+            // Add dimension rows
+            const dimFields = [
+              { key: 'body_length_mm', label: 'Body Length' },
+              { key: 'length_mm', label: 'Length' },
+              { key: 'body_width_mm', label: 'Body Width' },
+              { key: 'width_mm', label: 'Width' },
+              { key: 'height_mm', label: 'Height/Thickness' },
+              { key: 'pin_count', label: 'Pin Count' },
+              { key: 'pin_pitch_mm', label: 'Pin Pitch' },
+              { key: 'package_type', label: 'Package Type' }
+            ];
+            
+            dimFields.forEach(field => {
+              const value = packageDims[field.key];
+              if (value !== null && value !== undefined && value !== '') {
+                const row = document.createElement('tr');
+                const labelCell = document.createElement('td');
+                labelCell.className = 'json-table-key';
+                labelCell.style.fontWeight = '600';
+                labelCell.textContent = field.label;
+                row.appendChild(labelCell);
+                
+                const valueCell = document.createElement('td');
+                valueCell.className = 'json-table-value';
+                if (typeof value === 'number' && (field.key.includes('mm') || field.key === 'pin_pitch_mm')) {
+                  valueCell.textContent = `${value} mm`;
+                } else {
+                  valueCell.textContent = String(value);
+                }
+                row.appendChild(valueCell);
+                
+                tbody.appendChild(row);
+              }
+            });
+            
+            if (tbody.children.length > 0) {
+              dimsTable.appendChild(tbody);
+              dimsDiv.appendChild(dimsTable);
+              rightSideDiv.appendChild(dimsDiv);
+            }
+          }
+          
+          // OEM Datasheet Download
           if (stepOutput.datasheet_path) {
             const pdfDiv = document.createElement('div');
-            pdfDiv.style.marginTop = '12px';
             pdfDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">OEM Datasheet PDF:</strong>';
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'chain-step-preview';
             downloadBtn.style.marginTop = '8px';
-            downloadBtn.textContent = 'Download Datasheet PDF';
+            downloadBtn.style.width = '100%';
+            downloadBtn.textContent = '📄 Download Datasheet PDF';
             downloadBtn.onclick = () => {
               // Convert relative path to absolute URL
               const pdfPath = stepOutput.datasheet_path;
-              const pdfUrl = pdfPath.startsWith('http') ? pdfPath : `http://localhost:5001/api/download?file=${encodeURIComponent(pdfPath)}`;
+              // Try different path formats
+              let pdfUrl;
+              if (pdfPath.startsWith('http')) {
+                pdfUrl = pdfPath;
+              } else if (pdfPath.startsWith('/')) {
+                pdfUrl = `http://localhost:5001${pdfPath}`;
+              } else {
+                // Try api_results path
+                const cleanPath = pdfPath.replace(/^.*\/([^\/]+\.pdf)$/, '$1');
+                pdfUrl = `http://localhost:5001/api_results/datasheets/${encodeURIComponent(cleanPath)}`;
+              }
               window.open(pdfUrl, '_blank');
             };
             pdfDiv.appendChild(downloadBtn);
-            outputDiv.appendChild(pdfDiv);
+            rightSideDiv.appendChild(pdfDiv);
+          }
+          
+          // Add right side to container if it has content
+          if (rightSideDiv.children.length > 0) {
+            contentContainer.appendChild(rightSideDiv);
+          }
+          
+          // Add container to output if it has content
+          if (contentContainer.children.length > 0) {
+            outputDiv.appendChild(contentContainer);
           }
         }
         
@@ -1315,13 +1567,29 @@ console.log('===========================================');
         const img = document.createElement('img');
         // Convert relative path to absolute URL if needed
         const vizPath = step.visualization;
-        img.src = vizPath.startsWith('http') ? vizPath : `http://localhost:5001/api/download?file=${encodeURIComponent(vizPath)}`;
+        
+        // Handle different URL formats
+        let imgSrc;
+        if (vizPath.startsWith('http')) {
+          // Already a full URL
+          imgSrc = vizPath;
+        } else if (vizPath.includes('/api/download') || vizPath.includes('api/download')) {
+          // Already formatted as /api/download URL
+          imgSrc = vizPath.startsWith('http') ? vizPath : `http://localhost:5001${vizPath}`;
+        } else {
+          // Clean path - remove api_results prefix if present
+          const cleanPath = vizPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+          imgSrc = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
+        }
+        
+        img.src = imgSrc;
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
         img.style.marginTop = '10px';
         img.style.borderRadius = '6px';
         img.style.border = '1px solid var(--border)';
         img.onerror = function() {
+          console.error('[API Integration] Failed to load visualization:', imgSrc, 'Original path:', vizPath);
           this.style.display = 'none';
           const errorMsg = document.createElement('p');
           errorMsg.textContent = 'Image could not be loaded';
@@ -1347,11 +1615,25 @@ console.log('===========================================');
     
     // Fetch final results and add conversational summary (keep process chain visible but completed)
     async function fetchFinalResults(sessionId, processChainMsg, chat, messagesEl) {
-      // Prevent duplicate calls - check if summary already exists
-      if (chat.messages.some(m => m._sessionId === sessionId && m._hasReport)) {
-        console.log('[API Integration] Summary already exists, skipping fetchFinalResults');
+      // Prevent duplicate calls - check if summary already exists with more robust check
+      const existingSummaries = chat.messages.filter(m => m._sessionId === sessionId && m._hasReport);
+      if (existingSummaries.length > 0) {
+        console.log(`[API Integration] Summary already exists (${existingSummaries.length} found), skipping fetchFinalResults`);
+        console.log('[API Integration] Existing summaries:', existingSummaries.map(m => ({ time: m.time, resultIndex: m._resultIndex })));
         return;
       }
+      
+      // Also check if we're already fetching (prevent concurrent calls)
+      if (fetchFinalResults._fetching && fetchFinalResults._fetching.has(sessionId)) {
+        console.log('[API Integration] Already fetching results for this session, skipping');
+        return;
+      }
+      
+      // Mark as fetching
+      if (!fetchFinalResults._fetching) {
+        fetchFinalResults._fetching = new Set();
+      }
+      fetchFinalResults._fetching.add(sessionId);
       
       try {
         const response = await fetch(`${window.icDetectionAPI.baseUrl}/session/${sessionId}`);
@@ -1365,12 +1647,49 @@ console.log('===========================================');
           }
           
           // Remove any existing summaries for this session to prevent duplicates
+          // Use a more robust deduplication approach
+          const seenSummaryKeys = new Set();
+          const beforeCount = chat.messages.length;
           chat.messages = chat.messages.filter(m => {
-            return !(m._sessionId === sessionId && m._hasReport);
+            if (m._sessionId === sessionId && m._hasReport) {
+              // Create a unique key for this summary
+              const key = `${m._sessionId}_${m._resultIndex || 0}`;
+              if (seenSummaryKeys.has(key)) {
+                console.log(`[API Integration] Removing duplicate summary with key: ${key}`);
+                return false; // Duplicate
+              }
+              seenSummaryKeys.add(key);
+            }
+            return true;
           });
+          const removedCount = beforeCount - chat.messages.length;
+          if (removedCount > 0) {
+            console.log(`[API Integration] Removed ${removedCount} duplicate summary message(s)`);
+          }
+          
+          // Track which result indices we're adding to prevent duplicates
+          const addedResultIndices = new Set();
           
           // Add single consolidated summary with download button for each result
           data.results.forEach((apiResult, idx) => {
+            // Skip if we already have a summary for this result index
+            if (addedResultIndices.has(idx)) {
+              console.log(`[API Integration] Skipping duplicate result index ${idx}`);
+              return;
+            }
+            
+            // Check if a summary already exists for this result index
+            const existingSummary = chat.messages.find(m => 
+              m._sessionId === sessionId && 
+              m._resultIndex === idx && 
+              m._hasReport
+            );
+            if (existingSummary) {
+              console.log(`[API Integration] Summary already exists for result index ${idx}, skipping`);
+              addedResultIndices.add(idx);
+              return;
+            }
+            
             if (apiResult.chat_response && Array.isArray(apiResult.chat_response)) {
               // Find the summary message (backend returns a list with one summary message)
               const summaryMsg = apiResult.chat_response.find(m => m.type === 'summary');
@@ -1400,7 +1719,7 @@ console.log('===========================================');
               const finalMsg = {
                 role: 'bot',
                 text: summaryText,
-                time: Date.now(),
+                time: Date.now() + idx, // Add small offset to ensure unique timestamps
                 _sessionId: sessionId,
                 _resultIndex: idx,
                 _hasReport: !!apiResult.report_path,  // Include download button flag
@@ -1413,6 +1732,8 @@ console.log('===========================================');
                 }
               };
               chat.messages.push(finalMsg);
+              addedResultIndices.add(idx);
+              console.log(`[API Integration] Added summary for result index ${idx} of session ${sessionId}`);
             } else if (apiResult.report_path) {
               // If no chat_response but report exists, create download-only message
               const downloadMsg = {
@@ -1435,9 +1756,19 @@ console.log('===========================================');
           
           saveMessagesToStorage(chat.messages);
           renderMessagesFallback(chat, messagesEl);
+          
+          // Clear fetching flag
+          if (fetchFinalResults._fetching) {
+            fetchFinalResults._fetching.delete(sessionId);
+          }
         }
       } catch (error) {
         console.error('[API Integration] Error fetching final results:', error);
+        
+        // Clear fetching flag on error
+        if (fetchFinalResults._fetching) {
+          fetchFinalResults._fetching.delete(sessionId);
+        }
         // Replace process chain with error message
         const processChainIdx = chat.messages.findIndex(m => m._processChain);
         if (processChainIdx !== -1) {

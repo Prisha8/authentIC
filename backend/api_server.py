@@ -15,10 +15,12 @@ matplotlib.use('Agg')  # Non-GUI backend - works in threads
 
 from flask import Flask, request, jsonify, send_file, Response, stream_with_context, send_from_directory
 from flask_cors import CORS
+from werkzeug.exceptions import RequestEntityTooLarge
 from pathlib import Path
 import json
 import uuid
 from datetime import datetime
+from typing import Optional, List
 import sys
 import time
 import queue
@@ -34,6 +36,19 @@ from agents.conversational_agent import get_agent
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
+
+# Configure maximum upload size (100MB) to handle multiple high-resolution images and PDFs
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB in bytes
+
+# Error handler for request entity too large
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(e):
+    """Handle 413 Request Entity Too Large errors"""
+    return jsonify({
+        'error': 'File upload too large. Maximum size is 100MB. Please reduce the number or size of images/PDFs.',
+        'status': 'failed',
+        'max_size_mb': 100
+    }), 413
 
 # Initialize detector
 detector = CounterfeitDetector(output_dir="api_results")
@@ -58,7 +73,18 @@ def health_check():
 @app.route('/api_results/<path:filename>')
 def serve_result_file(filename):
     """Serve files from api_results directory"""
-    return send_from_directory('api_results', filename)
+    # api_results is at the project root (../../api_results from backend/)
+    # Try relative path first, then try parent directories
+    import os
+    api_results_dir = Path('api_results')
+    if not api_results_dir.exists():
+        # Try two levels up (from backend/ to project root)
+        api_results_dir = Path(__file__).parent.parent.parent / 'api_results'
+    if not api_results_dir.exists():
+        # Fallback: try one level up
+        api_results_dir = Path(__file__).parent.parent / 'api_results'
+    
+    return send_from_directory(str(api_results_dir), filename)
 
 
 @app.route('/api/chat', methods=['POST'])
@@ -164,11 +190,16 @@ def detect_counterfeit():
     """
     try:
         # Collect uploaded files (support single or multiple)
+        # Note: RequestEntityTooLarge will be caught by the error handler, not here
         image_files = []
-        if 'images' in request.files:
-            image_files = request.files.getlist('images')
-        elif 'image' in request.files:
-            image_files = [request.files['image']]
+        try:
+            if 'images' in request.files:
+                image_files = request.files.getlist('images')
+            elif 'image' in request.files:
+                image_files = [request.files['image']]
+        except RequestEntityTooLarge:
+            # Re-raise to let the error handler catch it
+            raise
         
         if not image_files:
             return jsonify({
@@ -178,6 +209,28 @@ def detect_counterfeit():
         
         # Generate session ID
         session_id = str(uuid.uuid4())
+        
+        # Get PDF upload if provided
+        uploaded_pdf_path = None
+        if 'pdf' in request.files:
+            pdf_file = request.files['pdf']
+            if pdf_file.filename:
+                try:
+                    pdf_file.seek(0)
+                    pdf_content = pdf_file.read()
+                    upload_dir = Path('api_results') / 'uploads'
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    pdf_path = upload_dir / f"{session_id}_uploaded_datasheet_{Path(pdf_file.filename).name}"
+                    with open(pdf_path, 'wb') as f:
+                        f.write(pdf_content)
+                    uploaded_pdf_path = str(pdf_path.resolve())
+                    print(f"[API] Uploaded PDF saved: {uploaded_pdf_path}")
+                except Exception as e:
+                    print(f"[API] Warning: Failed to save uploaded PDF: {e}")
+                    # Continue without PDF - will scrape instead
+        
+        # Get additional info if provided
+        additional_info = request.form.get('additional_info', '')
         
         # CRITICAL: Read file contents into memory BEFORE starting background thread
         # Flask file objects get closed when request ends, so we must read them first
@@ -221,8 +274,8 @@ def detect_counterfeit():
                 upload_dir = Path('api_results') / 'uploads'
                 upload_dir.mkdir(parents=True, exist_ok=True)
                 
-                results_list = []
-                
+                # Save all images first
+                all_image_paths = []
                 for idx, file_data in enumerate(file_contents):
                     filename = file_data['filename']
                     file_content = file_data['content']  # Already in memory
@@ -281,26 +334,40 @@ def detect_counterfeit():
                     except Exception as e:
                         raise IOError(f"Cannot read image file {image_path}: {e}")
                     
-                    # Run detection with progress tracking (use absolute path)
-                    result = _detect_with_progress(detector, str(image_path), session_id, progress_queue)
-                    
-                    chat_response = generate_chat_response(result)
-                    # Ensure report_path is absolute for storage
-                    report_path_stored = getattr(result, 'report_path', None)
-                    if report_path_stored:
-                        report_path_stored = str(Path(report_path_stored).resolve())
-                    
-                    results_list.append({
+                    all_image_paths.append(str(image_path))
+                
+                # Run detection with all images (multiple views)
+                # Pass uploaded PDF path and additional info
+                if not all_image_paths:
+                    raise ValueError("No image paths available for detection")
+                
+                result = _detect_with_progress(
+                    detector, 
+                    all_image_paths[0],  # Primary image (guaranteed to exist)
+                    session_id, 
+                    progress_queue,
+                    all_image_paths=all_image_paths,  # All images for multi-view analysis
+                    uploaded_pdf_path=uploaded_pdf_path,
+                    additional_info=additional_info
+                )
+                
+                chat_response = generate_chat_response(result)
+                # Ensure report_path is absolute for storage
+                report_path_stored = getattr(result, 'report_path', None)
+                if report_path_stored:
+                    report_path_stored = str(Path(report_path_stored).resolve())
+                
+                results_list = [{
                     'verdict': result.verdict,
                     'score': result.authenticity_score,
                     'part_number': result.part_number,
                     'manufacturer': result.manufacturer,
                     'package_type': result.package_type,
                     'anomalies_count': len(result.anomalies),
-                        'report_path': report_path_stored,
-                        'chat_response': chat_response,
-                        'dimension_viz': getattr(result, 'dimension_visualization', None)
-                })
+                    'report_path': report_path_stored,
+                    'chat_response': chat_response,
+                    'dimension_viz': getattr(result, 'dimension_visualization', None)
+                }]
                 
                 # Mark as completed
                 sessions[session_id].update({
@@ -315,14 +382,20 @@ def detect_counterfeit():
                 })
                 
             except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                error_msg = str(e)
+                print(f"[API] Error in background detection thread: {error_msg}")
+                print(f"[API] Traceback:\n{error_trace}")
                 sessions[session_id].update({
                     'status': 'failed',
-                    'error': str(e),
-                    'failed_at': datetime.now().isoformat()
+                    'error': error_msg,
+                    'failed_at': datetime.now().isoformat(),
+                    'traceback': error_trace
                 })
                 progress_queue.put({
                     'type': 'error',
-                    'message': str(e)
+                    'message': error_msg
                 })
         
         # Start background thread
@@ -336,15 +409,35 @@ def detect_counterfeit():
             'message': 'Detection started'
         })
             
+    except RequestEntityTooLarge:
+        # Re-raise to let the error handler catch it
+        raise
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[API] Error in /api/detect endpoint: {e}")
+        print(f"[API] Traceback:\n{error_trace}")
         return jsonify({
             'error': str(e),
-            'status': 'failed'
+            'status': 'failed',
+            'traceback': error_trace
         }), 500
 
 
-def _detect_with_progress(detector, image_path: str, session_id: str, progress_queue: queue.Queue):
-    """Run detection and emit progress updates"""
+def _detect_with_progress(detector, image_path: str, session_id: str, progress_queue: queue.Queue, 
+                          uploaded_pdf_path: Optional[str] = None, additional_info: Optional[str] = None,
+                          all_image_paths: Optional[List[str]] = None):
+    """Run detection and emit progress updates
+    
+    Args:
+        detector: CounterfeitDetector instance
+        image_path: Path to primary IC image (for backward compatibility)
+        session_id: Session ID for tracking
+        progress_queue: Queue for progress updates
+        uploaded_pdf_path: Optional path to uploaded OEM PDF (if provided, skip scraping)
+        additional_info: Optional additional information about the IC
+        all_image_paths: Optional list of all IC image paths (multiple views)
+    """
     from agents.counterfeit_detector import DetectionResult
     import time
     from pathlib import Path
@@ -352,16 +445,25 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
     
     try:
         start_time = time.time()
-        image_path = Path(image_path)
         
-        # Ensure file exists and is readable
-        if not image_path.exists():
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+        # Use all_image_paths if provided, otherwise use single image_path
+        if all_image_paths:
+            image_paths = [Path(p) for p in all_image_paths]
+            primary_image_path = image_paths[0]
+        else:
+            primary_image_path = Path(image_path)
+            image_paths = [primary_image_path]
+        
+        # Ensure primary file exists and is readable
+        if not primary_image_path.exists():
+            raise FileNotFoundError(f"Image file not found: {primary_image_path}")
         
         result = DetectionResult(
-            ic_image_path=str(image_path),
+            ic_image_path=str(primary_image_path),
+            ic_image_paths=[str(p) for p in image_paths],  # All images for multi-view analysis
             timestamp=datetime.now().isoformat(),
-            anomalies=[]
+            anomalies=[],
+            additional_info=additional_info  # Store additional info if provided
         )
         
         # STEP 1: IC Identification
@@ -372,11 +474,13 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'status': 'running',
             'message': 'Analyzing IC image with Gemini...'
         })
-        # Ensure image path is absolute and exists
-        image_path_abs = image_path.resolve()
+        # Use primary image for identification (can be enhanced to use all images)
+        image_path_abs = primary_image_path.resolve()
         if not image_path_abs.exists():
             raise FileNotFoundError(f"Image file not found: {image_path_abs}")
-        ic_info = detector._identify_ic(image_path_abs)
+        
+        # Pass all images and additional info to identification for better context
+        ic_info = detector._identify_ic(image_path_abs, additional_info=additional_info, all_images=image_paths)
         result.part_number = ic_info.get('part_number', 'UNKNOWN')
         result.manufacturer = ic_info.get('manufacturer', 'UNKNOWN')
         result.package_type = ic_info.get('package_type', 'UNKNOWN')
@@ -390,35 +494,56 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'data': ic_info  # Send full ic_info including date_codes, lot_codes, etc.
         })
         
-        # STEP 2: Datasheet Scraping
-        progress_queue.put({
-            'type': 'step',
-            'step': 'scrape',
-            'title': 'Searching OEM Datasheet',
-            'status': 'running',
-            'message': f'Searching for {result.part_number} datasheet...'
-        })
-        datasheet_path = detector._scrape_datasheet(result.part_number)
-        # Convert to absolute path to avoid issues in background thread
-        if datasheet_path:
-            datasheet_path = str(Path(datasheet_path).resolve())
-        result.datasheet_path = datasheet_path
-        if datasheet_path:
+        # STEP 2: Datasheet - Use uploaded PDF or scrape
+        if uploaded_pdf_path and Path(uploaded_pdf_path).exists():
+            # User uploaded OEM PDF - skip scraping
             progress_queue.put({
                 'type': 'step',
                 'step': 'scrape',
-                'title': 'Searching OEM Datasheet',
+                'title': 'Using Uploaded OEM Datasheet',
                 'status': 'completed',
-                'message': 'Datasheet retrieved successfully'
+                'message': 'Using uploaded OEM datasheet',
+                'data': {
+                    'datasheet_path': uploaded_pdf_path,
+                    'source': 'uploaded'
+                }
             })
+            datasheet_path = str(Path(uploaded_pdf_path).resolve())
+            result.datasheet_path = datasheet_path
         else:
+            # No uploaded PDF - scrape for datasheet
             progress_queue.put({
                 'type': 'step',
                 'step': 'scrape',
                 'title': 'Searching OEM Datasheet',
-                'status': 'completed',
-                'message': 'No datasheet found (will proceed without it)'
+                'status': 'running',
+                'message': f'Searching for {result.part_number} datasheet...'
             })
+            datasheet_path = detector._scrape_datasheet(result.part_number)
+            # Convert to absolute path to avoid issues in background thread
+            if datasheet_path:
+                datasheet_path = str(Path(datasheet_path).resolve())
+            result.datasheet_path = datasheet_path
+            if datasheet_path:
+                progress_queue.put({
+                    'type': 'step',
+                    'step': 'scrape',
+                    'title': 'Searching OEM Datasheet',
+                    'status': 'completed',
+                    'message': 'Datasheet retrieved successfully',
+                    'data': {
+                        'datasheet_path': datasheet_path,
+                        'source': 'scraped'
+                    }
+                })
+            else:
+                progress_queue.put({
+                    'type': 'step',
+                    'step': 'scrape',
+                    'title': 'Searching OEM Datasheet',
+                    'status': 'completed',
+                    'message': 'No datasheet found (will proceed without it)'
+                })
         
         # STEP 3: Datasheet Parsing
         mechanical_diagram = None
@@ -506,10 +631,10 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
                 # Remove any leading slashes
                 dim_viz_rel = dim_viz_rel.lstrip('/')
                 
-                # URL encode the path to handle spaces and special characters
+                # Use /api/download endpoint for consistency
                 from urllib.parse import quote
-                dim_viz_rel_encoded = '/'.join(quote(part, safe='') for part in dim_viz_rel.split('/'))
-                viz_url = f'http://localhost:5001/api_results/{dim_viz_rel_encoded}'
+                dim_viz_rel_encoded = quote(dim_viz_rel, safe='')
+                viz_url = f'http://localhost:5001/api/download?file={dim_viz_rel_encoded}'
                 
                 print(f"[API] Dimension viz URL: {viz_url} (from path: {dim_viz}, relative: {dim_viz_rel})")
             except Exception as e:
@@ -544,10 +669,13 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'status': 'running',
             'message': 'Comparing IC with datasheet using Gemini...'
         })
+        # Pass all images for multi-view analysis
         visual_result = detector._gemini_visual_analysis(
-            image_path, mechanical_diagram, parsed_specs, result,
+            primary_image_path, mechanical_diagram, parsed_specs, result,
             dimension_analysis=dimension_dict,
-            datasheet_pdf_path=result.datasheet_path
+            datasheet_pdf_path=result.datasheet_path,
+            all_images=image_paths,  # Pass all images for comprehensive analysis
+            additional_info=additional_info
         )
         result.visual_comparison = visual_result
         result.anomalies = visual_result.get('anomalies', [])
@@ -735,16 +863,25 @@ def download_file():
     if not file_path:
         return jsonify({'error': 'No file specified'}), 400
     
+    # Find api_results directory (it's at project root, not relative to backend/)
+    api_results_path = Path('api_results')
+    if not api_results_path.exists():
+        # Try two levels up (from backend/ to project root)
+        api_results_path = Path(__file__).parent.parent.parent / 'api_results'
+    if not api_results_path.exists():
+        # Fallback: try one level up
+        api_results_path = Path(__file__).parent.parent / 'api_results'
+    
+    api_results_path = api_results_path.resolve()
+    
     # Handle both relative and absolute paths
     if Path(file_path).is_absolute():
         full_path = Path(file_path)
     else:
         # Relative to api_results directory
-        api_results_path = Path('api_results').resolve()
         full_path = api_results_path / file_path
     
     # Security: ensure path is within api_results
-    api_results_path = Path('api_results').resolve()
     try:
         full_path = full_path.resolve()
         if not str(full_path).startswith(str(api_results_path)):

@@ -230,21 +230,23 @@ class DatasheetScraper:
                                         raise retry_e
                             
                             if pdf_response and pdf_response.status_code == 200 and pdf_response.content.startswith(b'%PDF'):
-                                # Validate this PDF
+                                # Validate this PDF (but add even if below threshold)
                                 is_valid, confidence = self._validate_datasheet(
                                     pdf_response.content, part_number, url
                                 )
                                 
+                                # Add all candidates, even if below threshold (we'll select best later)
+                                candidates.append({
+                                    'content': pdf_response.content,
+                                    'url': url,
+                                    'confidence': confidence,
+                                    'size': len(pdf_response.content),
+                                    'is_valid': is_valid
+                                })
                                 if is_valid:
-                                    candidates.append({
-                                        'content': pdf_response.content,
-                                        'url': url,
-                                        'confidence': confidence,
-                                        'size': len(pdf_response.content)
-                                    })
                                     print(f"  [Tavily] ✓ Valid datasheet (confidence: {confidence:.2f})")
                                 else:
-                                    print(f"  [Tavily] ✗ Invalid datasheet (confidence: {confidence:.2f})")
+                                    print(f"  [Tavily] ⚠ Low confidence datasheet (confidence: {confidence:.2f}) - will consider if no better option")
                         except Exception as e:
                             print(f"  [Tavily] Failed to download: {str(e)[:50]}...")
                             continue
@@ -298,20 +300,24 @@ class DatasheetScraper:
                                         pdf_response = self.session.get(pdf_url, timeout=15, allow_redirects=True)
                                         
                                         if pdf_response.status_code == 200 and pdf_response.content.startswith(b'%PDF'):
-                                            # Validate this PDF
+                                            # Validate this PDF (but add even if below threshold)
                                             is_valid, confidence = self._validate_datasheet(
                                                 pdf_response.content, part_number, pdf_url
                                             )
                                             
+                                            # Add all candidates, even if below threshold
+                                            candidates.append({
+                                                'content': pdf_response.content,
+                                                'url': pdf_url,
+                                                'confidence': confidence,
+                                                'size': len(pdf_response.content),
+                                                'is_valid': is_valid
+                                            })
                                             if is_valid:
-                                                candidates.append({
-                                                    'content': pdf_response.content,
-                                                    'url': pdf_url,
-                                                    'confidence': confidence,
-                                                    'size': len(pdf_response.content)
-                                                })
                                                 print(f"  [Tavily] ✓ Valid datasheet from page (confidence: {confidence:.2f})")
-                                                break  # Found valid PDF on this page
+                                            else:
+                                                print(f"  [Tavily] ⚠ Low confidence datasheet (confidence: {confidence:.2f}) - will consider if no better option")
+                                            break  # Found PDF on this page (even if low confidence)
                                     except Exception as e:
                                         print(f"  [Tavily] Failed PDF link: {str(e)[:40]}...")
                                         continue
@@ -323,11 +329,14 @@ class DatasheetScraper:
                     if candidates and max(c['confidence'] for c in candidates) >= 0.9:
                         break
                 
-                # Select best candidate
+                # Select best candidate (even if all below threshold)
                 if candidates:
-                    # Sort by confidence (descending)
+                    # Sort by confidence (descending) - select highest even if below threshold
                     best = max(candidates, key=lambda x: x['confidence'])
-                    print(f"  [Tavily] ✓ Selected best datasheet (confidence: {best['confidence']:.2f}, {best['size']} bytes)")
+                    if best['is_valid']:
+                        print(f"  [Tavily] ✓ Selected best datasheet (confidence: {best['confidence']:.2f}, {best['size']} bytes)")
+                    else:
+                        print(f"  [Tavily] ⚠ Selected best available datasheet (confidence: {best['confidence']:.2f} - below threshold, but using as best option)")
                     return self._save_pdf(best['content'], part_number, 'tavily')
         
         except Exception as e:

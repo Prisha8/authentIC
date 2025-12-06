@@ -53,7 +53,8 @@ from agents.gemini_ic_identifier import identify_ic, setup_gemini
 @dataclass
 class DetectionResult:
     """Complete detection result"""
-    ic_image_path: str
+    ic_image_path: str  # Primary image path (for backward compatibility)
+    ic_image_paths: List[str] = None  # All IC image paths (multiple views)
     part_number: str = "UNKNOWN"
     manufacturer: str = "UNKNOWN"
     package_type: str = "UNKNOWN"
@@ -63,6 +64,9 @@ class DetectionResult:
     datasheet_path: Optional[str] = None
     mechanical_diagram_path: Optional[str] = None
     parsed_specs: Optional[Dict] = None
+    
+    # Additional context
+    additional_info: Optional[str] = None  # User-provided additional information
     
     # Tool results
     dimension_analysis: Optional[Dict] = None
@@ -82,6 +86,11 @@ class DetectionResult:
     timestamp: str = ""
     processing_time_seconds: float = 0.0
     report_path: Optional[str] = None  # Path to generated PDF report
+    
+    def __post_init__(self):
+        """Initialize ic_image_paths if not provided"""
+        if self.ic_image_paths is None:
+            self.ic_image_paths = [self.ic_image_path] if self.ic_image_path else []
 
 
 class CounterfeitDetector:
@@ -221,10 +230,23 @@ class CounterfeitDetector:
         
         return result
     
-    def _identify_ic(self, image_path: Path) -> Dict:
-        """Step 1: Identify IC using Gemini VLM"""
+    def _identify_ic(self, image_path: Path, additional_info: Optional[str] = None, all_images: Optional[List[Path]] = None) -> Dict:
+        """Step 1: Identify IC using Gemini VLM
+        
+        Args:
+            image_path: Primary image path
+            additional_info: Optional additional information about the IC
+            all_images: Optional list of all image paths (multiple views)
+        """
         try:
-            ic_info = identify_ic(self.identifier_model, str(image_path))
+            # Use primary image for identification, but can be enhanced to use all images
+            ic_info = identify_ic(self.identifier_model, str(image_path), additional_info=additional_info)
+            
+            # If multiple images provided, note it in the info
+            if all_images and len(all_images) > 1:
+                ic_info['multiple_views'] = True
+                ic_info['view_count'] = len(all_images)
+            
             return ic_info
         except Exception as e:
             print(f"⚠️  Identification failed: {e}")
@@ -380,6 +402,11 @@ class CounterfeitDetector:
                 
                 # Save updated summary
                 json_path = parser.save_summary(info)
+            
+            # Fallback: Use first available diagram if best_diagram is None
+            if not best_diagram and info.mechanical_diagrams:
+                best_diagram = info.mechanical_diagrams[0]
+                print(f"  → Using first available mechanical diagram: {Path(best_diagram).name}")
             
             # Convert info to dict for Gemini
             parsed_data = {
@@ -619,7 +646,9 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             
             # Generate visualization
             from tools.dimension_estimator import visualize_dimensions
-            viz_path = str(self.output_dir / f"dimension_analysis_{image_path.stem}.png")
+            # Ensure image_path is a Path object for .stem attribute
+            image_path_obj = Path(image_path) if not isinstance(image_path, Path) else image_path
+            viz_path = str(self.output_dir / f"dimension_analysis_{image_path_obj.stem}.png")
             visualize_dimensions(str(image_path), dim_result)
             
             # Move the generated visualization
@@ -664,22 +693,37 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
                                 parsed_specs: Optional[Dict],
                                 result: DetectionResult,
                                 dimension_analysis: Optional[Dict] = None,
-                                datasheet_pdf_path: Optional[str] = None) -> Dict:
+                                datasheet_pdf_path: Optional[str] = None,
+                                all_images: Optional[List[Path]] = None,
+                                additional_info: Optional[str] = None) -> Dict:
         """Step 5: Gemini visual comparison and anomaly detection
         
         Args:
             datasheet_pdf_path: Optional path to full PDF datasheet for Gemini to analyze entirely
+            all_images: Optional list of all IC image paths (multiple views)
+            additional_info: Optional additional information about the IC
         """
         
         try:
-            # Load IC image
+            # Load primary IC image
             ic_image = Image.open(ic_image_path)
             
             # Build prompt with parsed specs and dimension analysis
-            prompt = self._build_analysis_prompt(result, mechanical_diagram is not None, parsed_specs, dimension_analysis, datasheet_pdf_path is not None)
+            prompt = self._build_analysis_prompt(result, mechanical_diagram is not None, parsed_specs, dimension_analysis, datasheet_pdf_path is not None, additional_info=additional_info)
             
-            # Build content list
+            # Build content list - start with prompt and primary image
             content = [prompt, ic_image]
+            
+            # Add additional images if provided (multiple views)
+            if all_images and len(all_images) > 1:
+                content.append("\n\nADDITIONAL IC VIEWS (Multiple angles/perspectives):")
+                for idx, img_path in enumerate(all_images[1:], 2):  # Skip first (already added)
+                    try:
+                        additional_img = Image.open(img_path)
+                        content.append(f"\nView {idx}:")
+                        content.append(additional_img)
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to load additional image {img_path}: {e}")
             
             # If we have the full PDF, upload it to Gemini for complete analysis
             if datasheet_pdf_path:
@@ -741,7 +785,7 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             print(f"  ✗ Visual analysis failed: {e}")
             return {'anomalies': [], 'observations': str(e)}
     
-    def _build_analysis_prompt(self, result: DetectionResult, has_diagram: bool, parsed_specs: Optional[Dict] = None, dimension_analysis: Optional[Dict] = None, has_full_pdf: bool = False) -> str:
+    def _build_analysis_prompt(self, result: DetectionResult, has_diagram: bool, parsed_specs: Optional[Dict] = None, dimension_analysis: Optional[Dict] = None, has_full_pdf: bool = False, additional_info: Optional[str] = None) -> str:
         """Build prompt for Gemini visual analysis"""
         
         base_prompt = f"""You are an expert in counterfeit IC detection. Analyze this IC image for authenticity.
@@ -750,6 +794,19 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
 - Part Number: {result.part_number}
 - Manufacturer: {result.manufacturer}
 - Package: {result.package_type} ({result.pin_count}-pin)
+"""
+        
+        # Add additional info if provided
+        if additional_info:
+            base_prompt += f"""
+**Additional Context (User Provided):**
+{additional_info}
+"""
+        
+        # Note if multiple views are available
+        if result.ic_image_paths and len(result.ic_image_paths) > 1:
+            base_prompt += f"""
+**Note:** Multiple views ({len(result.ic_image_paths)} images) of this IC are provided. Analyze all views comprehensively and consider different angles/perspectives in your assessment.
 """
 
         if parsed_specs:
@@ -976,11 +1033,11 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             parent=styles['Heading1'],
             fontSize=24,
             textColor=colors.HexColor('#1a1a1a'),
-            spaceAfter=30,
+            spaceAfter=20,
             alignment=TA_CENTER
         )
         story.append(Paragraph("COUNTERFEIT IC DETECTION REPORT", title_style))
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.2*inch))
         
         # Verdict box
         verdict_color = colors.green if result.authenticity_score >= 75 else \
@@ -1004,7 +1061,7 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             ('PADDING', (0, 0), (-1, -1), 10),
         ]))
         story.append(verdict_table)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.25*inch))
         
         # IC Information
         story.append(Paragraph("IC INFORMATION", styles['Heading2']))
@@ -1022,7 +1079,131 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
         story.append(ic_table)
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.25*inch))
+        
+        # Input IC Images Section (show all views if multiple images provided)
+        if result.ic_image_paths and len(result.ic_image_paths) > 0:
+            story.append(Paragraph("INPUT IC IMAGES", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            
+            if len(result.ic_image_paths) > 1:
+                story.append(Paragraph(
+                    f"<b>Multiple Views Provided:</b> {len(result.ic_image_paths)} images showing different angles/perspectives of the IC.",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.15*inch))
+            
+            # Display all images
+            for idx, img_path in enumerate(result.ic_image_paths, 1):
+                try:
+                    if Path(img_path).exists():
+                        if len(result.ic_image_paths) > 1:
+                            story.append(Paragraph(f"<b>View {idx}:</b>", styles['Heading3']))
+                            story.append(Spacer(1, 0.08*inch))
+                        
+                        # Add image with proportional scaling
+                        ic_img = RLImage(img_path, width=5.5*inch, height=4.1*inch, kind='proportional')
+                        story.append(ic_img)
+                        story.append(Spacer(1, 0.15*inch))
+                    else:
+                        story.append(Paragraph(f"<i>Image {idx} not found: {img_path}</i>", styles['Normal']))
+                except Exception as e:
+                    print(f"  ⚠️  Failed to load image {img_path} for report: {e}")
+                    story.append(Paragraph(f"<i>Failed to load image {idx}: {str(e)}</i>", styles['Normal']))
+            
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Executive Summary with Detailed Analysis
+        story.append(Paragraph("EXECUTIVE SUMMARY", styles['Heading2']))
+        story.append(Spacer(1, 0.1*inch))
+        
+        # Build comprehensive summary from visual comparison
+        summary_text = ""
+        if result.visual_comparison:
+            visual = result.visual_comparison
+            summary_text = f"<b>Overall Assessment:</b> {visual.get('overall_assessment', 'Unknown').upper()}<br/><br/>"
+            
+            # Text Quality Analysis
+            text_quality_score = visual.get('text_quality_score', 0)
+            if isinstance(text_quality_score, (int, float)):
+                text_status = "✓ GOOD" if text_quality_score >= 70 else "⚠ MODERATE" if text_quality_score >= 50 else "✗ POOR"
+                summary_text += f"<b>Text Quality Analysis:</b> {text_status} (Score: {text_quality_score}/100)<br/>"
+                if text_quality_score >= 70:
+                    summary_text += "Markings appear crisp and well-defined. Font weight, kerning, and line layout are consistent with OEM specifications. No signs of erosion or tampering detected.<br/><br/>"
+                elif text_quality_score >= 50:
+                    summary_text += "Markings show moderate quality. Some inconsistencies in font weight or spacing may be present. Minor erosion or wear may be visible but within acceptable limits.<br/><br/>"
+                else:
+                    summary_text += "Markings show poor quality with visible erosion, inconsistent font weight, or irregular spacing. Possible signs of remarking or tampering detected.<br/><br/>"
+            
+            # Pin Count Verification
+            pin_verified = visual.get('pin_count_verified', False)
+            summary_text += f"<b>Pin Count Verification:</b> {'✓ VERIFIED' if pin_verified else '✗ MISMATCH'}<br/>"
+            if pin_verified:
+                summary_text += f"The IC has {result.pin_count} pins, which matches the datasheet specification. Pin count is correct.<br/><br/>"
+            else:
+                summary_text += f"Pin count mismatch detected. Expected {result.pin_count} pins according to datasheet, but actual count differs. This is a significant indicator of potential counterfeiting.<br/><br/>"
+            
+            # Package Type Verification
+            package_verified = visual.get('package_type_verified', False)
+            summary_text += f"<b>Package Type Verification:</b> {'✓ VERIFIED' if package_verified else '✗ MISMATCH'}<br/>"
+            if package_verified:
+                summary_text += f"Package type ({result.package_type}) matches the datasheet specification. Package outline, corners, and physical characteristics are consistent.<br/><br/>"
+            else:
+                summary_text += f"Package type mismatch detected. Expected {result.package_type} but physical characteristics differ from datasheet. This indicates potential counterfeiting.<br/><br/>"
+            
+            # Pin Spacing/Pitch Analysis
+            if visual.get('pin_pitch_verified') is not None:
+                pitch_verified = visual.get('pin_pitch_verified', False)
+                summary_text += f"<b>Pin Pitch/Spacing:</b> {'✓ VERIFIED' if pitch_verified else '⚠ REVIEW NEEDED'}<br/>"
+                if pitch_verified:
+                    summary_text += "Pin pitch and row-to-row spacing match datasheet specifications. Pins are properly aligned with no warping or misalignment detected.<br/><br/>"
+                else:
+                    summary_text += "Pin pitch or spacing shows discrepancies from datasheet. Alignment issues or warping may be present. Further inspection recommended.<br/><br/>"
+            
+            # Surface Texture Analysis
+            if visual.get('surface_texture_assessment'):
+                surface_assessment = visual.get('surface_texture_assessment', '')
+                summary_text += f"<b>Surface Texture Analysis:</b> {surface_assessment.upper()}<br/>"
+                if 'uniform' in surface_assessment.lower() or 'consistent' in surface_assessment.lower():
+                    summary_text += "Surface texture appears uniform and consistent with authentic ICs. No signs of sanding, remarking, or tampering detected.<br/><br/>"
+                elif 'irregular' in surface_assessment.lower() or 'inconsistent' in surface_assessment.lower():
+                    summary_text += "Surface texture shows irregularities or inconsistencies. Possible signs of sanding, remarking, or surface tampering detected. This is a significant indicator of counterfeiting.<br/><br/>"
+                else:
+                    summary_text += f"Surface texture assessment: {surface_assessment}. Review recommended.<br/><br/>"
+            
+            # Observations
+            observations = visual.get('observations', [])
+            if observations:
+                summary_text += "<b>Key Observations:</b><br/>"
+                for obs in observations[:5]:  # Top 5 observations
+                    summary_text += f"• {obs}<br/>"
+                summary_text += "<br/>"
+        
+        # Add dimension analysis summary
+        if result.dimension_analysis:
+            dim = result.dimension_analysis
+            summary_text += "<b>Dimensional Analysis:</b><br/>"
+            expected_ar = dim.get('expected_aspect_ratio')
+            measured_ar = dim.get('measured_aspect_ratio')
+            if expected_ar and measured_ar:
+                error_percent = abs(measured_ar - expected_ar) / expected_ar * 100 if expected_ar > 0 else 0
+                if error_percent < 5:
+                    summary_text += f"✓ Package dimensions match datasheet specifications. Measured aspect ratio ({measured_ar:.3f}) closely matches expected ({expected_ar:.3f}). Error: {error_percent:.1f}%.<br/><br/>"
+                elif error_percent < 10:
+                    summary_text += f"⚠ Package dimensions show minor deviation. Measured aspect ratio ({measured_ar:.3f}) differs from expected ({expected_ar:.3f}) by {error_percent:.1f}%. Within acceptable tolerance.<br/><br/>"
+                else:
+                    summary_text += f"✗ Package dimensions show significant deviation. Measured aspect ratio ({measured_ar:.3f}) differs from expected ({expected_ar:.3f}) by {error_percent:.1f}%. This indicates potential counterfeiting.<br/><br/>"
+            elif measured_ar:
+                summary_text += f"Measured aspect ratio: {measured_ar:.3f}. No ground truth available for comparison.<br/><br/>"
+        
+        # Add reasoning if available
+        if result.reasoning:
+            summary_text += f"<b>Final Reasoning:</b> {result.reasoning}<br/>"
+        
+        if summary_text:
+            summary_para = Paragraph(summary_text, styles['Normal'])
+            story.append(summary_para)
+            story.append(Spacer(1, 0.2*inch))
         
         # Dimension Analysis Visualization (if available)
         if result.dimension_visualization and Path(result.dimension_visualization).exists() and result.dimension_analysis:
@@ -1030,8 +1211,8 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             story.append(Paragraph("DIMENSION ANALYSIS", styles['Heading2']))
             story.append(Spacer(1, 0.08*inch))
             
-            # Image with detected bbox (compact)
-            dim_viz = RLImage(result.dimension_visualization, width=6.2*inch, height=4.6*inch, kind='proportional')
+            # Image with detected bbox (ensure it fits - max 5.5 inches width)
+            dim_viz = RLImage(result.dimension_visualization, width=5.5*inch, height=4.1*inch, kind='proportional')
             story.append(dim_viz)
             story.append(Spacer(1, 0.18*inch))
             
@@ -1090,18 +1271,450 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             story.append(dim_table)
             story.append(Spacer(1, 0.12*inch))
         
-        # Mechanical Diagram (if available)
+        # Mechanical Diagram (Outline Dimension Page) with Dimensions Table and Download
         if result.mechanical_diagram_path and Path(result.mechanical_diagram_path).exists():
             story.append(PageBreak())
-            story.append(Paragraph("DATASHEET MECHANICAL DIAGRAM", styles['Heading2']))
-            diagram_img = RLImage(result.mechanical_diagram_path, width=6.5*inch, height=6.5*inch, kind='proportional')
-            story.append(diagram_img)
+            story.append(Paragraph("DATASHEET OUTLINE DIMENSION PAGE", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            
+            # Add description
+            story.append(Paragraph(
+                "The following page shows the exact mechanical outline diagram extracted from the OEM datasheet. "
+                "This diagram contains the official package dimensions, pin layout, and physical specifications "
+                "used for comparison with the actual IC image.",
+                styles['Normal']
+            ))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # Extract dimensions from mechanical diagram if not already extracted
+            extracted_dims = None
+            if result.parsed_specs and result.parsed_specs.get('package_dimensions'):
+                # Use already extracted dimensions
+                extracted_dims = result.parsed_specs['package_dimensions']
+            else:
+                # Try to extract dimensions now
+                print("  → Extracting dimensions from mechanical diagram for report...")
+                extracted_dims = self._extract_dimensions_with_gemini(result.mechanical_diagram_path)
+                if extracted_dims:
+                    # Store for later use
+                    if result.parsed_specs is None:
+                        result.parsed_specs = {}
+                    result.parsed_specs['package_dimensions'] = extracted_dims
+            
+            # Show diagram (ensure it fits within page margins)
+            # Page frame is ~456x636 points, leave margins, so max ~400x580 points
+            # 1 inch = 72 points, so max ~5.5x8 inches
+            try:
+                # Use proportional scaling to ensure it fits
+                diagram_img = RLImage(result.mechanical_diagram_path, width=5.5*inch, height=8*inch, kind='proportional')
+                story.append(diagram_img)
+                story.append(Spacer(1, 0.2*inch))
+            except Exception as e:
+                print(f"  ⚠️  Failed to load diagram image: {e}")
+                story.append(Paragraph(f"<i>Diagram image could not be loaded: {str(e)}</i>", styles['Normal']))
+                story.append(Spacer(1, 0.2*inch))
+            
+            # Dimensions Table (if extracted)
+            if extracted_dims:
+                story.append(Paragraph("EXTRACTED DIMENSIONS FROM DIAGRAM", styles['Heading3']))
+                story.append(Spacer(1, 0.08*inch))
+                story.append(Paragraph(
+                    "The following dimensions were extracted from the mechanical diagram above using AI analysis:",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.1*inch))
+                
+                dim_table_data = [['Parameter', 'Value']]
+                
+                # Add all available dimensions
+                if extracted_dims.get('body_length_mm'):
+                    dim_table_data.append(['Body Length', f"{extracted_dims['body_length_mm']} mm"])
+                if extracted_dims.get('body_width_mm'):
+                    dim_table_data.append(['Body Width', f"{extracted_dims['body_width_mm']} mm"])
+                if extracted_dims.get('height_mm'):
+                    dim_table_data.append(['Height/Thickness', f"{extracted_dims['height_mm']} mm"])
+                if extracted_dims.get('pin_count'):
+                    dim_table_data.append(['Pin Count', str(extracted_dims['pin_count'])])
+                if extracted_dims.get('pin_pitch_mm'):
+                    dim_table_data.append(['Pin Pitch', f"{extracted_dims['pin_pitch_mm']} mm"])
+                if extracted_dims.get('package_type'):
+                    dim_table_data.append(['Package Type', extracted_dims['package_type']])
+                
+                if len(dim_table_data) > 1:  # More than just header
+                    dims_table = Table(dim_table_data, colWidths=[2.5*inch, 3.7*inch])
+                    dims_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a4a4a')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                        ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8e8e8')),
+                        ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#333333')),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 10.5),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+                        ('PADDING', (0, 0), (-1, -1), 6),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ]))
+                    story.append(dims_table)
+                    story.append(Spacer(1, 0.15*inch))
+            else:
+                story.append(Paragraph(
+                    "<i>Note: Dimension extraction from diagram was not available. Dimensions may be available from parsed datasheet data.</i>",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.15*inch))
+            
+            # Download OEM Datasheet information
+            if result.datasheet_path and Path(result.datasheet_path).exists():
+                story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading3']))
+                story.append(Spacer(1, 0.08*inch))
+                datasheet_filename = Path(result.datasheet_path).name
+                story.append(Paragraph(
+                    f"<b>Source File:</b> {datasheet_filename}<br/>"
+                    f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
+                    f"<i>The complete OEM datasheet PDF is available in the detection results directory. "
+                    f"This document contains the full technical specifications, electrical characteristics, "
+                    f"and mechanical drawings for this IC part number.</i>",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.2*inch))
+        elif result.datasheet_path and Path(result.datasheet_path).exists():
+            # If no diagram but datasheet exists, still show datasheet info
+            story.append(PageBreak())
+            story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            datasheet_filename = Path(result.datasheet_path).name
+            story.append(Paragraph(
+                f"<b>Source File:</b> {datasheet_filename}<br/>"
+                f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
+                f"<i>Note: Mechanical diagram extraction was not available, but the complete OEM datasheet PDF "
+                f"is available in the detection results directory.</i>",
+                styles['Normal']
+            ))
             story.append(Spacer(1, 0.2*inch))
         
-        # Analysis Results
-        story.append(Paragraph("ANALYSIS RESULTS", styles['Heading2']))
-        story.append(Paragraph(f"<b>Reasoning:</b> {result.reasoning}", styles['Normal']))
-        story.append(Spacer(1, 0.1*inch))
+        # Detailed Visual Analysis Section
+        if result.visual_comparison:
+            story.append(PageBreak())
+            story.append(Paragraph("DETAILED VISUAL ANALYSIS", styles['Heading2']))
+            story.append(Spacer(1, 0.15*inch))
+            
+            visual = result.visual_comparison
+            
+            # Text Quality Detailed Analysis
+            text_quality_score = visual.get('text_quality_score', 0)
+            if isinstance(text_quality_score, (int, float)):
+                story.append(Paragraph("<b>1. Text Quality Assessment</b>", styles['Heading3']))
+                text_analysis = f"""
+                <b>Score:</b> {text_quality_score}/100<br/><br/>
+                """
+                if text_quality_score >= 80:
+                    text_analysis += """
+                    <b>Status:</b> ✓ EXCELLENT<br/>
+                    The IC markings demonstrate high-quality printing characteristics consistent with authentic OEM manufacturing:
+                    <br/>• Font weight and style match OEM specifications
+                    <br/>• Character spacing (kerning) is uniform and consistent
+                    <br/>• Line layout and alignment are precise
+                    <br/>• No visible signs of erosion, fading, or tampering
+                    <br/>• Markings appear crisp and well-defined
+                    <br/><br/>
+                    """
+                elif text_quality_score >= 70:
+                    text_analysis += """
+                    <b>Status:</b> ✓ GOOD<br/>
+                    The IC markings show good quality with minor variations:
+                    <br/>• Overall font characteristics are consistent with OEM standards
+                    <br/>• Minor inconsistencies in spacing or alignment may be present but within acceptable limits
+                    <br/>• No significant signs of tampering or remarking
+                    <br/><br/>
+                    """
+                elif text_quality_score >= 50:
+                    text_analysis += """
+                    <b>Status:</b> ⚠ MODERATE<br/>
+                    The IC markings show moderate quality with some concerns:
+                    <br/>• Some inconsistencies in font weight, spacing, or alignment detected
+                    <br/>• Minor erosion or wear may be visible
+                    <br/>• Markings may appear slightly faded or irregular
+                    <br/>• Further inspection recommended to rule out remarking
+                    <br/><br/>
+                    """
+                else:
+                    text_analysis += """
+                    <b>Status:</b> ✗ POOR<br/>
+                    The IC markings show significant quality issues that raise concerns:
+                    <br/>• Inconsistent font weight, spacing, or alignment
+                    <br/>• Visible erosion, fading, or irregular printing
+                    <br/>• Possible signs of remarking or surface tampering
+                    <br/>• Markings do not match OEM quality standards
+                    <br/>• This is a strong indicator of potential counterfeiting
+                    <br/><br/>
+                    """
+                story.append(Paragraph(text_analysis, styles['Normal']))
+                story.append(Spacer(1, 0.15*inch))
+            
+            # Pin Count and Spacing Analysis
+            story.append(Paragraph("<b>2. Pin Configuration Analysis</b>", styles['Heading3']))
+            pin_analysis = ""
+            
+            pin_verified = visual.get('pin_count_verified', False)
+            if pin_verified:
+                pin_analysis += f"""
+                <b>Pin Count:</b> ✓ VERIFIED ({result.pin_count} pins)<br/>
+                The actual pin count matches the datasheet specification. All pins are present and accounted for.
+                <br/><br/>
+                """
+            else:
+                pin_analysis += f"""
+                <b>Pin Count:</b> ✗ MISMATCH<br/>
+                Pin count discrepancy detected. Expected {result.pin_count} pins according to datasheet, but actual count differs.
+                This is a significant red flag indicating potential counterfeiting or incorrect part identification.
+                <br/><br/>
+                """
+            
+            # Pin Pitch/Spacing
+            if visual.get('pin_pitch_verified') is not None:
+                pitch_verified = visual.get('pin_pitch_verified', False)
+                if pitch_verified:
+                    pin_analysis += """
+                    <b>Pin Pitch/Spacing:</b> ✓ VERIFIED<br/>
+                    Pin pitch and row-to-row spacing match datasheet specifications. Pins are properly aligned with no warping,
+                    misalignment, or irregular spacing detected. The pin configuration is consistent with authentic OEM manufacturing.
+                    <br/><br/>
+                    """
+                else:
+                    pin_analysis += """
+                    <b>Pin Pitch/Spacing:</b> ⚠ REVIEW NEEDED<br/>
+                    Pin pitch or spacing shows discrepancies from datasheet specifications. Possible issues include:
+                    <br/>• Irregular spacing between pins
+                    <br/>• Misalignment or warping of pin rows
+                    <br/>• Inconsistent pin-to-pin distances
+                    <br/>• Deviation from standard pitch values (e.g., 1.27mm, 2.54mm)
+                    <br/>Further inspection recommended to determine if this indicates counterfeiting.
+                    <br/><br/>
+                    """
+            else:
+                pin_analysis += """
+                <b>Pin Pitch/Spacing:</b> Analysis not available<br/>
+                Pin spacing analysis could not be performed. This may be due to image quality or angle limitations.
+                <br/><br/>
+                """
+            
+            story.append(Paragraph(pin_analysis, styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # Package Type and Outline
+            story.append(Paragraph("<b>3. Package Type and Outline Verification</b>", styles['Heading3']))
+            package_verified = visual.get('package_type_verified', False)
+            package_analysis = ""
+            if package_verified:
+                package_analysis += f"""
+                <b>Package Type:</b> ✓ VERIFIED ({result.package_type})<br/>
+                The package type matches the datasheet specification. Physical characteristics verified:
+                <br/>• Package outline and dimensions are consistent
+                <br/>• Corner style (chamfered, rounded, or square) matches specification
+                <br/>• Overall package geometry aligns with OEM design
+                <br/><br/>
+                """
+            else:
+                package_analysis += f"""
+                <b>Package Type:</b> ✗ MISMATCH<br/>
+                Package type discrepancy detected. Expected {result.package_type} but physical characteristics differ from datasheet.
+                This indicates potential counterfeiting or incorrect part identification.
+                <br/><br/>
+                """
+            
+            # Pin-1 Indicator
+            if visual.get('pin1_indicator_verified') is not None:
+                pin1_verified = visual.get('pin1_indicator_verified', False)
+                if pin1_verified:
+                    package_analysis += """
+                    <b>Pin-1 Indicator:</b> ✓ VERIFIED<br/>
+                    The pin-1 indicator (dot, notch, or bevel) location and orientation match the datasheet diagram.
+                    The indicator is correctly positioned relative to the package orientation.
+                    <br/><br/>
+                    """
+                else:
+                    package_analysis += """
+                    <b>Pin-1 Indicator:</b> ⚠ REVIEW NEEDED<br/>
+                    Pin-1 indicator location or orientation may not match datasheet specifications. This could indicate
+                    incorrect package orientation or potential counterfeiting.
+                    <br/><br/>
+                    """
+            
+            story.append(Paragraph(package_analysis, styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # Surface Texture Analysis
+            story.append(Paragraph("<b>4. Surface Texture and Finish Analysis</b>", styles['Heading3']))
+            surface_analysis = ""
+            
+            if visual.get('surface_texture_assessment'):
+                surface_assessment = visual.get('surface_texture_assessment', '')
+                if 'uniform' in surface_assessment.lower() or 'consistent' in surface_assessment.lower():
+                    surface_analysis += """
+                    <b>Surface Texture:</b> ✓ UNIFORM AND CONSISTENT<br/>
+                    The IC surface shows uniform texture and finish consistent with authentic OEM manufacturing:
+                    <br/>• No signs of sanding, grinding, or surface tampering
+                    <br/>• Finish is consistent across the entire package surface
+                    <br/>• No visible irregularities or texture variations
+                    <br/>• Surface appears smooth and professionally finished
+                    <br/><br/>
+                    """
+                elif 'irregular' in surface_assessment.lower() or 'inconsistent' in surface_assessment.lower():
+                    surface_analysis += """
+                    <b>Surface Texture:</b> ✗ IRREGULAR OR INCONSISTENT<br/>
+                    Surface texture irregularities detected, indicating potential tampering:
+                    <br/>• Possible signs of sanding or surface grinding
+                    <br/>• Inconsistent finish or texture variations across the package
+                    <br/>• Visible marks or irregularities suggesting remarking
+                    <br/>• Surface may appear rough or tampered with
+                    <br/>This is a strong indicator of counterfeiting or remarking.
+                    <br/><br/>
+                    """
+                else:
+                    surface_analysis += f"""
+                    <b>Surface Texture:</b> {surface_assessment}<br/>
+                    Surface texture assessment completed. Review recommended for detailed analysis.
+                    <br/><br/>
+                    """
+            else:
+                surface_analysis += """
+                <b>Surface Texture:</b> Analysis not available<br/>
+                Surface texture analysis could not be performed. This may be due to image quality or lighting conditions.
+                <br/><br/>
+                """
+            
+            story.append(Paragraph(surface_analysis, styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # Markings Analysis
+            story.append(Paragraph("<b>5. Markings and Labeling Analysis</b>", styles['Heading3']))
+            markings_analysis = ""
+            
+            if visual.get('markings_verified') is not None:
+                markings_verified = visual.get('markings_verified', False)
+                if markings_verified:
+                    markings_analysis += """
+                    <b>Markings:</b> ✓ VERIFIED<br/>
+                    IC markings are consistent with OEM specifications:
+                    <br/>• Part number matches expected format and style
+                    <br/>• Manufacturer logo/name is correctly placed and styled
+                    <br/>• Date codes and lot codes (if present) follow expected format
+                    <br/>• Marking placement relative to pin-1/notch is correct
+                    <br/>• Overall marking layout matches datasheet specifications
+                    <br/><br/>
+                    """
+                else:
+                    markings_analysis += """
+                    <b>Markings:</b> ⚠ REVIEW NEEDED<br/>
+                    Marking inconsistencies detected:
+                    <br/>• Part number format or style may differ from expected
+                    <br/>• Manufacturer logo placement or style may be incorrect
+                    <br/>• Date/lot code format may not match OEM standards
+                    <br/>• Marking placement relative to package features may be off
+                    <br/>Further inspection recommended.
+                    <br/><br/>
+                    """
+            else:
+                markings_analysis += """
+                <b>Markings:</b> Analysis completed<br/>
+                Markings have been reviewed. Part number, manufacturer, and other identifiers have been verified.
+                <br/><br/>
+                """
+            
+            story.append(Paragraph(markings_analysis, styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # QFN/BGA Specific Analysis
+            if result.package_type and ('QFN' in result.package_type.upper() or 'BGA' in result.package_type.upper()):
+                story.append(Paragraph("<b>6. QFN/BGA Specific Analysis</b>", styles['Heading3']))
+                qfn_analysis = ""
+                
+                if visual.get('pad_grid_verified') is not None:
+                    pad_verified = visual.get('pad_grid_verified', False)
+                    if pad_verified:
+                        qfn_analysis += """
+                        <b>Pad/Ball Grid:</b> ✓ VERIFIED<br/>
+                        Pad (QFN) or ball (BGA) grid dimensions and configuration match datasheet specifications.
+                        Grid layout, spacing, and alignment are correct.
+                        <br/><br/>
+                        """
+                    else:
+                        qfn_analysis += """
+                        <b>Pad/Ball Grid:</b> ⚠ REVIEW NEEDED<br/>
+                        Pad or ball grid shows discrepancies. Grid dimensions, spacing, or alignment may not match
+                        datasheet specifications. This could indicate counterfeiting.
+                        <br/><br/>
+                        """
+                
+                if visual.get('exposed_pad_verified') is not None:
+                    epad_verified = visual.get('exposed_pad_verified', False)
+                    if epad_verified:
+                        qfn_analysis += """
+                        <b>Exposed Pad:</b> ✓ VERIFIED<br/>
+                        Exposed pad (thermal pad) presence, size, and alignment match datasheet specifications.
+                        <br/><br/>
+                        """
+                    else:
+                        qfn_analysis += """
+                        <b>Exposed Pad:</b> ⚠ REVIEW NEEDED<br/>
+                        Exposed pad characteristics may not match datasheet. Size, position, or presence may differ.
+                        <br/><br/>
+                        """
+                
+                if qfn_analysis:
+                    story.append(Paragraph(qfn_analysis, styles['Normal']))
+                    story.append(Spacer(1, 0.15*inch))
+            
+            # Overall Assessment
+            story.append(Paragraph("<b>7. Overall Visual Assessment</b>", styles['Heading3']))
+            overall_assessment = visual.get('overall_assessment', 'unknown')
+            assessment_text = ""
+            
+            if overall_assessment.lower() == 'authentic':
+                assessment_text = """
+                <b>Assessment:</b> ✓ AUTHENTIC<br/>
+                Based on comprehensive visual analysis, the IC appears to be authentic. All major checks passed:
+                <br/>• Physical characteristics match datasheet specifications
+                <br/>• No significant anomalies or red flags detected
+                <br/>• Markings, dimensions, and package features are consistent with OEM standards
+                <br/><br/>
+                """
+            elif overall_assessment.lower() == 'suspicious':
+                assessment_text = """
+                <b>Assessment:</b> ⚠ SUSPICIOUS<br/>
+                The IC shows some concerning characteristics that warrant further investigation:
+                <br/>• Some inconsistencies detected in markings, dimensions, or physical features
+                <br/>• Minor anomalies may be present
+                <br/>• Additional verification recommended before use
+                <br/><br/>
+                """
+            elif overall_assessment.lower() == 'counterfeit':
+                assessment_text = """
+                <b>Assessment:</b> ✗ COUNTERFEIT<br/>
+                The IC shows clear signs of counterfeiting:
+                <br/>• Significant discrepancies from datasheet specifications
+                <br/>• Multiple anomalies and red flags detected
+                <br/>• Physical characteristics do not match OEM standards
+                <br/>• Do not use this component in production
+                <br/><br/>
+                """
+            else:
+                assessment_text = f"""
+                <b>Assessment:</b> {overall_assessment.upper()}<br/>
+                Visual assessment completed. Review detailed analysis above for specific findings.
+                <br/><br/>
+                """
+            
+            story.append(Paragraph(assessment_text, styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Analysis Results Summary
+        story.append(PageBreak())
+        story.append(Paragraph("ANALYSIS RESULTS SUMMARY", styles['Heading2']))
+        if result.reasoning:
+            story.append(Paragraph(f"<b>Final Reasoning:</b> {result.reasoning}", styles['Normal']))
+        story.append(Spacer(1, 0.15*inch))
         
         # Anomalies with Images and Reasoning
         if annotated_images and len(annotated_images) > 0:
@@ -1113,7 +1726,7 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
                     # Skip if no anomalies
                     story.append(Paragraph("<b>No anomalies detected. IC appears authentic.</b>", styles['Normal']))
                     if Path(img_path).exists():
-                        clean_img = RLImage(img_path, width=5*inch, height=5*inch, kind='proportional')
+                        clean_img = RLImage(img_path, width=5*inch, height=4.5*inch, kind='proportional')
                         story.append(clean_img)
                     break
                 
@@ -1149,17 +1762,96 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
                 story.append(Paragraph(description, styles['Normal']))
                 story.append(Spacer(1, 0.15*inch))
                 
-                # Annotated Image
+                # Annotated Image (ensure it fits - max 5.5 inches width)
                 if Path(img_path).exists():
-                    anom_img = RLImage(img_path, width=5.5*inch, height=5.5*inch, kind='proportional')
+                    anom_img = RLImage(img_path, width=5.5*inch, height=5.0*inch, kind='proportional')
                     story.append(anom_img)
                 
                 if i < len(annotated_images):
                     story.append(PageBreak())
         
-        # Build PDF
-        doc.build(story)
-        print(f"  ✓ Report generated: {report_filename}")
+        # Build PDF with error handling for Flowable too large errors
+        try:
+            doc.build(story)
+            print(f"  ✓ Report generated: {report_filename}")
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ✗ PDF generation error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            
+            # If it's a Flowable too large error, try to rebuild with smaller images
+            if 'too large' in error_msg.lower() or 'flowable' in error_msg.lower():
+                print(f"  ⚠ Retrying with reduced image sizes...")
+                # Create a new story with reduced image sizes
+                new_story = []
+                for element in story:
+                    if isinstance(element, RLImage):
+                        # Create new image with reduced size
+                        try:
+                            # Reduce by 25% to ensure it fits
+                            new_width = element._width * 0.75 if hasattr(element, '_width') and element._width else 4*inch
+                            new_height = element._height * 0.75 if hasattr(element, '_height') and element._height else 6*inch
+                            # Ensure max dimensions
+                            new_width = min(new_width, 5*inch)
+                            new_height = min(new_height, 7*inch)
+                            
+                            # Get the image path from the element
+                            img_path = element._filename if hasattr(element, '_filename') else None
+                            if img_path and Path(img_path).exists():
+                                new_img = RLImage(img_path, width=new_width, height=new_height, kind='proportional')
+                                new_story.append(new_img)
+                            else:
+                                new_story.append(element)  # Keep original if we can't resize
+                        except Exception as img_err:
+                            print(f"  ⚠ Failed to resize image: {img_err}")
+                            new_story.append(element)  # Keep original on error
+                    else:
+                        new_story.append(element)  # Keep non-image elements
+                
+                try:
+                    # Create new document and build with reduced images
+                    new_doc = SimpleDocTemplate(str(report_path), pagesize=letter)
+                    new_doc.build(new_story)
+                    print(f"  ✓ Report generated after retry: {report_filename}")
+                except Exception as e2:
+                    print(f"  ✗ PDF generation failed after retry: {e2}")
+                    # Still return a path so the system doesn't break
+                    # Create a minimal error report text file
+                    error_report_path = self.output_dir / f"error_report_{Path(result.ic_image_path).stem}_{timestamp_str}.txt"
+                    with open(error_report_path, 'w') as f:
+                        f.write(f"PDF Generation Error\n")
+                        f.write(f"==================\n\n")
+                        f.write(f"Error: {error_msg}\n\n")
+                        f.write(f"Detection completed successfully, but PDF report generation failed.\n\n")
+                        f.write(f"IC Information:\n")
+                        f.write(f"  Part Number: {result.part_number}\n")
+                        f.write(f"  Manufacturer: {result.manufacturer}\n")
+                        f.write(f"  Package Type: {result.package_type}\n")
+                        f.write(f"  Pin Count: {result.pin_count}\n\n")
+                        f.write(f"Verdict: {result.verdict}\n")
+                        f.write(f"Score: {result.authenticity_score}/100\n\n")
+                        f.write(f"Anomalies: {len(result.anomalies)}\n")
+                    print(f"  ⚠ Created error report: {error_report_path}")
+                    return str(error_report_path)
+            else:
+                # For other errors, still try to create error report
+                error_report_path = self.output_dir / f"error_report_{Path(result.ic_image_path).stem}_{timestamp_str}.txt"
+                with open(error_report_path, 'w') as f:
+                    f.write(f"PDF Generation Error\n")
+                    f.write(f"==================\n\n")
+                    f.write(f"Error: {error_msg}\n\n")
+                    f.write(f"Detection completed successfully, but PDF report generation failed.\n\n")
+                    f.write(f"IC Information:\n")
+                    f.write(f"  Part Number: {result.part_number}\n")
+                    f.write(f"  Manufacturer: {result.manufacturer}\n")
+                    f.write(f"  Package Type: {result.package_type}\n")
+                    f.write(f"  Pin Count: {result.pin_count}\n\n")
+                    f.write(f"Verdict: {result.verdict}\n")
+                    f.write(f"Score: {result.authenticity_score}/100\n\n")
+                    f.write(f"Anomalies: {len(result.anomalies)}\n")
+                print(f"  ⚠ Created error report: {error_report_path}")
+                return str(error_report_path)
         
         return str(report_path)
     

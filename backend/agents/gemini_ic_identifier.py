@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 import time
+from typing import Optional
 from google.api_core import exceptions
 
 # Add parent directory to path to import utils
@@ -32,9 +33,14 @@ def setup_gemini(api_key: str):
     return model
 
 
-def identify_ic(model, image_path: str) -> dict:
+def identify_ic(model, image_path: str, additional_info: Optional[str] = None) -> dict:
     """
     Ask Gemini to identify IC and provide datasheet search info
+    
+    Args:
+        model: Gemini model instance
+        image_path: Path to IC image
+        additional_info: Optional additional information about the IC
     """
     
     # Load image and ensure it's fully in memory (not tied to file handle)
@@ -133,6 +139,19 @@ Important:
 - Look carefully at manufacturer logos or text
 - Count pins carefully (especially important for package identification)
 - Provide decoded meanings for all codes you extract
+"""
+    
+    # Add additional info if provided
+    if additional_info:
+        prompt += f"""
+
+**ADDITIONAL CONTEXT PROVIDED BY USER:**
+{additional_info}
+
+Please consider this additional information when identifying the IC. Use it to:
+- Validate or refine your identification
+- Provide more accurate part number if the user has provided hints
+- Cross-reference any provided details with what you observe in the image
 """
 
     # Generate response with retry logic

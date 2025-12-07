@@ -39,3 +39,8 @@ frontend/test-api.html
 # Temporary
 *.tmp
 *.temp
+
+# Generated data and runtime artifacts
+data/
+SETUP_VECTOR_DB.md
+requirements.txt

@@ -8,9 +8,423 @@ let isLoadingHistory = false;
 let hasMoreHistory = true;
 let currentFilters = { date: 'all', icType: 'all' };
 
+// Export delete and download functions early to ensure they're available
+// These will be used by the modal buttons
+window.deleteHistoryEntry = window.deleteHistoryEntry || async function(sessionId) {
+  console.log('[Dashboard] deleteHistoryEntry called with sessionId:', sessionId);
+  
+  if (!sessionId || sessionId === 'undefined' || sessionId === 'null' || sessionId.trim() === '') {
+    console.error('[Dashboard] Invalid session ID for deletion:', sessionId);
+    alert('Invalid session ID. Cannot delete.');
+    return;
+  }
+  
+  if (!confirm('Are you sure you want to delete this history entry? This action cannot be undone.')) {
+    return;
+  }
+  
+  try {
+    const API_BASE_URL = 'http://localhost:5001';
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    const url = `${API_BASE_URL}/api/history/${encodeURIComponent(sessionId)}`;
+    
+    console.log('[Dashboard] Deleting history entry:', url);
+    
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'X-User-Type': userType
+      }
+    });
+    
+    const data = await response.json();
+    console.log('[Dashboard] Delete response:', data);
+    
+    if (response.ok && data.status === 'success') {
+      // Close the modal
+      if (typeof window.closeHistoryDetailModal === 'function') {
+        window.closeHistoryDetailModal();
+      }
+      
+      // Refresh the history list
+      console.log('[Dashboard] Refreshing history after deletion...');
+      if (typeof window.handleHistorySortFilter === 'function') {
+        await window.handleHistorySortFilter();
+      } else if (typeof window.historyManager !== 'undefined' && typeof window.historyManager.loadHistory === 'function') {
+        await window.historyManager.loadHistory();
+      } else if (typeof window.loadHistory === 'function') {
+        await window.loadHistory();
+      } else {
+        // Direct API call fallback
+        try {
+          const response = await fetch('http://localhost:5001/api/history');
+          const data = await response.json();
+          if (data.status === 'success' && data.history) {
+            const historyList = document.getElementById('processedHistoryList');
+            if (historyList) {
+              // Use the same rendering logic
+              historyList.innerHTML = data.history.map(item => {
+                const icInfo = item.ic_info || {};
+                const scores = item.scores || {};
+                const filePaths = item.file_paths || {};
+                const partNumber = icInfo.part_number || 'UNKNOWN';
+                const manufacturer = icInfo.manufacturer || 'UNKNOWN';
+                const authenticityScore = scores.authenticity_score || 0;
+                const verdict = item.verdict || 'UNKNOWN';
+                const thumbnailUrl = filePaths.thumbnail 
+                  ? `http://localhost:5001/api_results/${filePaths.thumbnail}`
+                  : 'assets/logo.png';
+                return `<div class="history-card" data-session-id="${item.session_id}" onclick="if(typeof window.openHistoryDetail === 'function') window.openHistoryDetail('${item.session_id}')">
+                  <div class="history-card-left">
+                    <div class="history-card-image"><img src="${thumbnailUrl}" alt="${partNumber}" onerror="this.src='assets/logo.png'"></div>
+                    <div class="history-card-score"><span class="score-label">Score:</span><span class="score-value">${authenticityScore.toFixed(1)}</span></div>
+                  </div>
+                  <div class="history-card-content">
+                    <div class="history-card-header">
+                      <h5 class="history-card-title">${partNumber}</h5>
+                      <span class="history-card-manufacturer">${manufacturer}</span>
+                    </div>
+                    <div class="history-card-verdict-container">
+                      <span class="history-card-verdict">${verdict}</span>
+                    </div>
+                  </div>
+                </div>`;
+              }).join('');
+            }
+          }
+        } catch (error) {
+          console.error('[Dashboard] Error refreshing history:', error);
+        }
+      }
+      
+      // Show success message
+      alert('History entry deleted successfully');
+    } else {
+      throw new Error(data.error || 'Failed to delete history entry');
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error deleting history:', error);
+    alert('Failed to delete history entry: ' + error.message);
+  }
+};
+
+window.downloadHistoryReport = window.downloadHistoryReport || async function(sessionId) {
+  try {
+    const API_BASE_URL = 'http://localhost:5001';
+    if (!sessionId || sessionId === 'undefined' || sessionId === 'null' || sessionId.trim() === '') {
+      console.error('[Dashboard] Invalid session ID for download:', sessionId);
+      alert('Invalid session ID. Cannot download.');
+      return;
+    }
+    console.log('[Dashboard] Downloading report for session:', sessionId);
+    
+    // Get user type from localStorage (default to business)
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    
+    // Build download URL with user type parameter
+    const url = `${API_BASE_URL}/api/history/${encodeURIComponent(sessionId)}/download?user_type=${userType}`;
+    
+    console.log('[Dashboard] Download URL:', url);
+    
+    // Use anchor element for reliable download (works even with popup blockers)
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `counterfeit_report_${sessionId}.pdf`;
+    link.target = '_blank';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    
+    // Clean up after a short delay
+    setTimeout(() => {
+      document.body.removeChild(link);
+    }, 100);
+  } catch (error) {
+    console.error('[Dashboard] Error downloading report:', error);
+    alert('Failed to download report: ' + error.message);
+  }
+};
+
 // Define handleAnalyseSubmit early so it's available when form initializes
 // This will be implemented later in the file
 window.handleAnalyseSubmit = null;
+
+// Standalone sort/filter handler that works without historyManager
+window.handleHistorySortFilter = async function() {
+  const sortSelect = document.getElementById('historySortBy');
+  const verdictFilter = document.getElementById('filterVerdict');
+  
+  if (!sortSelect || !verdictFilter) {
+    console.warn('[Dashboard] Sort/filter controls not found');
+    return;
+  }
+  
+  const sortValue = sortSelect.value;
+  const filterValue = verdictFilter.value;
+  
+  console.log('[Dashboard] Sort/Filter changed - Sort:', sortValue, 'Filter:', filterValue);
+  
+  // Build API parameters
+  const params = new URLSearchParams();
+  
+  // Parse sort value (format: "field-order" like "date-desc" or "score-asc")
+  if (sortValue) {
+    const [sortField, sortOrder] = sortValue.split('-');
+    let backendSortField = 'processed_date';
+    if (sortField === 'date') {
+      backendSortField = 'processed_date';
+    } else if (sortField === 'score') {
+      backendSortField = 'authenticity_score';
+    } else if (sortField === 'part-number') {
+      backendSortField = 'part_number';
+    } else if (sortField === 'manufacturer') {
+      backendSortField = 'manufacturer';
+    }
+    params.append('sort_by', backendSortField);
+    params.append('sort_order', sortOrder === 'asc' ? 'ASC' : 'DESC');
+  }
+  
+  // Add filter
+  if (filterValue && filterValue !== 'all') {
+    params.append('verdict', filterValue);
+  }
+  
+  try {
+    const url = `http://localhost:5001/api/history${params.toString() ? '?' + params.toString() : ''}`;
+    console.log('[Dashboard] Fetching sorted/filtered history from:', url);
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.status === 'success' && data.history) {
+      console.log('[Dashboard] Got', data.history.length, 'history items');
+      if (data.history.length > 0) {
+        console.log('[Dashboard] First item structure:', JSON.stringify(data.history[0], null, 2));
+      }
+      
+      // Clear existing cards
+      const historyList = document.getElementById('processedHistoryList');
+      if (!historyList) {
+        console.error('[Dashboard] processedHistoryList not found');
+        return;
+      }
+      
+      if (data.history.length === 0) {
+        historyList.innerHTML = '<div class="empty-history"><p>No history found matching your filters.</p></div>';
+        return;
+      }
+      
+      // Render cards using the same logic as the fallback
+      const cardsHTML = data.history.map((item, index) => {
+        // Debug first item
+        if (index === 0) {
+          console.log('[Dashboard] Rendering first item:', {
+            session_id: item.session_id,
+            has_ic_info: !!item.ic_info,
+            has_scores: !!item.scores,
+            has_file_paths: !!item.file_paths,
+            part_number: item.part_number || item.ic_info?.part_number,
+            verdict: item.verdict
+          });
+        }
+        // Normalize data structure - handle both nested and flattened formats
+        let icInfo = item.ic_info || {};
+        let scores = item.scores || {};
+        let filePaths = item.file_paths || {};
+        
+        // If data is flattened (from vector search), reconstruct nested structure
+        if (!icInfo.part_number && item.part_number) {
+          icInfo = {
+            part_number: item.part_number,
+            manufacturer: item.manufacturer,
+            package_type: item.package_type,
+            pin_count: item.pin_count,
+            coo: item.coo || item.country_of_origin,
+            date_codes: item.date_codes || icInfo.date_codes || [],
+            lot_codes: item.lot_codes || icInfo.lot_codes || [],
+            temperature_grade: item.temperature_grade || icInfo.temperature_grade,
+            speed_grade: item.speed_grade || icInfo.speed_grade,
+            package_variant: item.package_variant || icInfo.package_variant
+          };
+        }
+        
+        if (!scores.authenticity_score && item.authenticity_score !== undefined) {
+          scores = {
+            authenticity_score: item.authenticity_score
+          };
+        }
+        
+        if (!filePaths.thumbnail && item.thumbnail) {
+          filePaths = {
+            thumbnail: item.thumbnail,
+            primary_image: item.primary_image || item.thumbnail,
+            datasheet: item.datasheet
+          };
+        }
+        
+        const partNumber = icInfo.part_number || item.part_number || 'UNKNOWN';
+        const manufacturer = icInfo.manufacturer || item.manufacturer || 'UNKNOWN';
+        const coo = icInfo.coo || item.coo || item.country_of_origin || 'Unknown';
+        const processedDateObj = new Date(item.processed_date);
+        const processedDate = processedDateObj.toLocaleDateString();
+        const processedTime = processedDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const authenticityScore = scores.authenticity_score || item.authenticity_score || 0;
+        let verdict = item.verdict || 'UNKNOWN';
+        if (verdict.toUpperCase().includes('SUSPICIOUS') && verdict.includes('REQUIRES')) {
+          verdict = 'SUSPICIOUS';
+        }
+        
+        const dateCodes = icInfo.date_codes || item.date_codes || [];
+        const lotCodes = icInfo.lot_codes || item.lot_codes || [];
+        const packageType = icInfo.package_type || item.package_type || null;
+        const tempGrade = icInfo.temperature_grade || item.temperature_grade || null;
+        const speedGrade = icInfo.speed_grade || item.speed_grade || null;
+        
+        let year = null;
+        if (dateCodes.length > 0 && dateCodes[0]) {
+          const dateCode = dateCodes[0];
+          if (typeof dateCode === 'object' && dateCode.decoded) {
+            const yearMatch = dateCode.decoded.match(/Year\s+(\d{4})/);
+            if (yearMatch) year = yearMatch[1];
+          } else if (typeof dateCode === 'string') {
+            const rawYear = dateCode.substring(0, 2);
+            if (rawYear) {
+              const yearNum = parseInt(rawYear);
+              if (yearNum >= 0 && yearNum <= 99) {
+                year = yearNum < 50 ? `20${rawYear}` : `19${rawYear}`;
+              }
+            }
+          }
+        }
+        
+        let lot = null;
+        if (lotCodes.length > 0 && lotCodes[0]) {
+          if (typeof lotCodes[0] === 'object' && lotCodes[0].raw) {
+            lot = lotCodes[0].raw;
+          } else if (typeof lotCodes[0] === 'string') {
+            lot = lotCodes[0];
+          }
+        }
+        
+        const additionalInfo = [];
+        if (lot) additionalInfo.push(`Lot: ${lot}`);
+        if (year) additionalInfo.push(`Year: ${year}`);
+        if (packageType && packageType !== 'UNKNOWN') {
+          const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+          if (pkgMatch) additionalInfo.push(`Pkg: ${pkgMatch[1]}`);
+        }
+        if (tempGrade) additionalInfo.push(`Temp: ${tempGrade}`);
+        if (speedGrade) additionalInfo.push(`Speed: ${speedGrade}`);
+        
+        const thumbnailPath = filePaths.thumbnail || item.thumbnail || (item.file_paths && item.file_paths.thumbnail);
+        const thumbnailUrl = thumbnailPath 
+          ? `http://localhost:5001/api_results/${thumbnailPath}`
+          : 'assets/logo.png';
+        const verdictClass = verdict.toUpperCase().includes('AUTHENTIC') ? 'verdict-authentic' :
+                           verdict.toUpperCase().includes('SUSPICIOUS') ? 'verdict-suspicious' :
+                           verdict.toUpperCase().includes('COUNTERFEIT') ? 'verdict-counterfeit' : 'verdict-unknown';
+        
+        return `
+          <div class="history-card" data-session-id="${item.session_id}" onclick="if(typeof window.openHistoryDetail === 'function') window.openHistoryDetail('${item.session_id}')">
+            <div class="history-card-left">
+              <div class="history-card-image">
+                <img src="${thumbnailUrl}" alt="${partNumber}" onerror="this.src='assets/logo.png'">
+              </div>
+              <div class="history-card-score">
+                <span class="score-label">Score:</span>
+                <span class="score-value">${authenticityScore.toFixed(1)}</span>
+              </div>
+            </div>
+            <div class="history-card-content">
+              <div class="history-card-header">
+                <h5 class="history-card-title">${partNumber.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h5>
+                <span class="history-card-manufacturer">${manufacturer.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+              </div>
+              <div class="history-card-meta">
+                <div class="history-card-date">
+                  <span>${processedDate}</span>
+                  <span class="history-card-time">${processedTime}</span>
+                </div>
+                <div class="history-card-coo-pkg">
+                  <span class="history-card-coo">COO: ${coo}</span>
+                  ${packageType && packageType !== 'UNKNOWN' ? (() => {
+                    const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+                    return pkgMatch ? `<span class="history-card-pkg">Pkg: ${pkgMatch[1]}</span>` : '';
+                  })() : ''}
+                </div>
+                ${additionalInfo.filter(info => !info.startsWith('Pkg:')).length > 0 ? `<div class="history-card-additional">${additionalInfo.filter(info => !info.startsWith('Pkg:')).join(' • ')}</div>` : ''}
+              </div>
+              <div class="history-card-verdict-container">
+                <span class="history-card-verdict ${verdictClass}">${verdict}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      historyList.innerHTML = cardsHTML;
+      console.log('[Dashboard] ✓ Rendered', data.history.length, 'history cards with sort/filter');
+      
+      // Update KPIs after history loads (only if no filters are active, or always for overall stats)
+      // KPIs should show overall stats, not filtered stats
+      if (typeof window.updateKPIsFromHistory === 'function') {
+        window.updateKPIsFromHistory();
+      }
+    } else {
+      console.error('[Dashboard] Failed to load history:', data.error);
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error loading sorted/filtered history:', error);
+    alert('Error loading history: ' + error.message);
+  }
+};
+
+// Initialize sort/filter buttons on page load
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('[Dashboard] Initializing sort/filter buttons...');
+  
+  // Wait a bit for elements to be available
+  setTimeout(() => {
+    const sortSelect = document.getElementById('historySortBy');
+    const verdictFilter = document.getElementById('filterVerdict');
+    
+    if (sortSelect && verdictFilter) {
+      console.log('[Dashboard] ✓ Found sort/filter controls, attaching handlers');
+      
+      // Attach handlers
+      sortSelect.addEventListener('change', window.handleHistorySortFilter);
+      sortSelect.addEventListener('input', window.handleHistorySortFilter);
+      verdictFilter.addEventListener('change', window.handleHistorySortFilter);
+      verdictFilter.addEventListener('input', window.handleHistorySortFilter);
+      
+      // Also use onchange as direct fallback
+      sortSelect.onchange = window.handleHistorySortFilter;
+      verdictFilter.onchange = window.handleHistorySortFilter;
+      
+      console.log('[Dashboard] ✓ Sort/filter handlers attached');
+    } else {
+      console.warn('[Dashboard] Sort/filter controls not found, retrying...');
+      // Retry after a delay
+      setTimeout(() => {
+        const retrySort = document.getElementById('historySortBy');
+        const retryFilter = document.getElementById('filterVerdict');
+        if (retrySort && retryFilter) {
+          retrySort.addEventListener('change', window.handleHistorySortFilter);
+          retrySort.addEventListener('input', window.handleHistorySortFilter);
+          retrySort.onchange = window.handleHistorySortFilter;
+          retryFilter.addEventListener('change', window.handleHistorySortFilter);
+          retryFilter.addEventListener('input', window.handleHistorySortFilter);
+          retryFilter.onchange = window.handleHistorySortFilter;
+          console.log('[Dashboard] ✓ Sort/filter handlers attached on retry');
+        }
+      }, 1000);
+    }
+  }, 500);
+});
 
 // Switch between Dashboard and Analyse ICs views
 // Define IMMEDIATELY so it's available for any inline handlers or early calls
@@ -162,6 +576,12 @@ window.switchView = function(view) {
       analyseBtn.classList.remove('active');
       console.log('[Dashboard] ✓ Removed active from analyse button');
     }
+    
+    // Update KPIs when switching to dashboard view
+    if (typeof window.updateKPIsFromHistory === 'function') {
+      console.log('[Dashboard] Updating KPIs after switching to dashboard view');
+      window.updateKPIsFromHistory();
+    }
   }
   
   // Force a reflow to ensure changes are visible
@@ -254,8 +674,54 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize Analyse ICs form
   initializeAnalyseForm();
   
-  // Initialize history loading
-  loadProcessedHistory();
+  // Load history for business users (use direct API calls)
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'business') {
+    console.log('[Dashboard] Business user detected, loading history via API');
+    
+    // Use the standalone function directly (no retry needed)
+    if (typeof window.handleHistorySortFilter === 'function') {
+      console.log('[Dashboard] Loading history using handleHistorySortFilter()');
+      window.handleHistorySortFilter();
+    } else {
+      // Fallback: direct API call
+      console.log('[Dashboard] handleHistorySortFilter not available, using direct API call');
+      fetch('http://localhost:5001/api/history')
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success' && data.history) {
+            console.log('[Dashboard] Got history data, rendering cards...');
+            const historyList = document.getElementById('processedHistoryList');
+            if (historyList && data.history.length > 0) {
+              // Use handleHistorySortFilter's rendering logic (it's already defined above)
+              // Just call it directly if available, otherwise render manually
+              if (typeof window.handleHistorySortFilter === 'function') {
+                window.handleHistorySortFilter();
+              } else {
+                historyList.innerHTML = '<div class="empty-history"><p>Error: History rendering function not available</p></div>';
+              }
+            } else if (data.history.length === 0) {
+              if (historyList) {
+                historyList.innerHTML = '<div class="empty-history"><p>No processed history yet. Process your first lot to get started.</p></div>';
+              }
+            }
+          } else {
+            console.error('[Dashboard] Failed to load history:', data.error);
+          }
+        })
+        .catch(err => {
+          console.error('[Dashboard] Error loading history:', err);
+          const historyList = document.getElementById('processedHistoryList');
+          if (historyList) {
+            historyList.innerHTML = '<div class="empty-history"><p>Error loading history. Please try again.</p></div>';
+          }
+        });
+    }
+  } else {
+    // Personal users - use old Supabase-based history
+    console.log('[Dashboard] Personal user detected, using Supabase-based history');
+    loadProcessedHistory();
+  }
   
   // Initialize filters
   initializeFilters();
@@ -675,6 +1141,10 @@ window.handleAnalyseSubmit = async function(event) {
       formData.append('additional_info', infoInput.value.trim());
     }
     
+    // Get user type and add to form data
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    formData.append('user_type', userType);
+    
     // Call API
     const response = await fetch('http://localhost:5001/api/detect', {
       method: 'POST',
@@ -692,14 +1162,30 @@ window.handleAnalyseSubmit = async function(event) {
       throw new Error('No session ID received from server');
     }
     
-    // Start polling for progress
+    // Start polling for progress (with small delay to ensure session is initialized)
     console.log('[Dashboard] Starting progress polling for session:', data.session_id);
-    pollAnalyseProgress(data.session_id);
+    setTimeout(() => {
+      pollAnalyseProgress(data.session_id);
+    }, 500); // Small delay to ensure session is fully initialized
     
-    // Reload history to show new entry
-    historyPage = 0;
-    hasMoreHistory = true;
-    loadProcessedHistory(true);
+    // Reload history to show new entry (only for personal users)
+    // userType already declared above, just reuse it
+    if (userType !== 'business') {
+      historyPage = 0;
+      hasMoreHistory = true;
+      loadProcessedHistory(true);
+    } else {
+      // Business users - reload via history-manager
+      if (typeof window.historyManager !== 'undefined' && typeof window.historyManager.loadHistory === 'function') {
+        window.historyManager.loadHistory();
+      }
+      // Also reload via handleHistorySortFilter to update the list
+      if (typeof window.handleHistorySortFilter === 'function') {
+        setTimeout(() => {
+          window.handleHistorySortFilter();
+        }, 500);
+      }
+    }
     
   } catch (error) {
     console.error('[Dashboard] Analyse ICs error:', error);
@@ -748,6 +1234,8 @@ async function pollAnalyseProgress(sessionId) {
   let pollCount = 0;
   const maxPolls = 300; // 5 minutes max (1 poll per second)
   let isComplete = false;
+  let consecutive404s = 0;
+  const max404s = 5; // Allow up to 5 consecutive 404s before giving up (session might be initializing)
   
   const pollInterval = setInterval(async () => {
     pollCount++;
@@ -764,18 +1252,44 @@ async function pollAnalyseProgress(sessionId) {
     
     try {
       const response = await fetch(`http://localhost:5001/api/progress/${sessionId}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.log('[Dashboard] Session not found, stopping poll');
+      
+      // Handle 404 - session might not be created yet, allow a few retries
+      if (response.status === 404) {
+        consecutive404s++;
+        if (consecutive404s > max404s) {
+          console.error('[Dashboard] Session not found after multiple attempts, stopping poll');
           clearInterval(pollInterval);
+          if (processChain) {
+            processChain.innerHTML = '<div class="process-error">Session not found. The analysis may have failed to start. Please try again.</div>';
+          }
           return;
         }
+        // Wait a bit longer before next poll if session not found
+        console.log(`[Dashboard] Session not found yet (attempt ${consecutive404s}/${max404s}), will retry...`);
+        return;
+      }
+      
+      // Reset 404 counter on successful response
+      consecutive404s = 0;
+      
+      if (!response.ok) {
         console.error('[Dashboard] Progress endpoint error, status:', response.status);
         return;
       }
       
       const data = await response.json();
       console.log('[Dashboard] Progress data received:', data);
+      
+      // Handle error in response
+      if (data.error && data.error === 'Session not found') {
+        consecutive404s++;
+        if (consecutive404s > max404s) {
+          console.error('[Dashboard] Session not found in response, stopping poll');
+          clearInterval(pollInterval);
+          return;
+        }
+        return;
+      }
       
       // Process all updates
       if (data.updates && Array.isArray(data.updates)) {
@@ -789,23 +1303,57 @@ async function pollAnalyseProgress(sessionId) {
             isComplete = true;
             clearInterval(pollInterval);
             await loadAnalyseFinalResults(sessionId);
+            
+            // Show notification
+            if (window.notificationService) {
+              window.notificationService.addNotification(
+                'Analysis Complete',
+                'Your IC analysis has been completed successfully. Results are available in your history.',
+                'success',
+                { label: 'View History', url: 'dashboard.html' }
+              );
+            }
             return;
           }
         }
       }
       
       // Check session status
-      if (data.session && data.session.status === 'completed') {
-        console.log('[Dashboard] Session marked as completed');
-        isComplete = true;
-        clearInterval(pollInterval);
-        await loadAnalyseFinalResults(sessionId);
-        return;
+      if (data.session) {
+        if (data.session.status === 'completed') {
+          console.log('[Dashboard] Session marked as completed');
+          isComplete = true;
+          clearInterval(pollInterval);
+          await loadAnalyseFinalResults(sessionId);
+          
+          // Show notification
+          if (window.notificationService) {
+            window.notificationService.addNotification(
+              'Analysis Complete',
+              'Your IC analysis has been completed successfully. Results are available in your history.',
+              'success',
+              { label: 'View History', url: 'dashboard.html' }
+            );
+          }
+          return;
+        } else if (data.session.status === 'failed') {
+          console.error('[Dashboard] Session failed:', data.session.error);
+          isComplete = true;
+          clearInterval(pollInterval);
+          if (processChain) {
+            processChain.innerHTML = `<div class="process-error">Analysis failed: ${data.session.error || 'Unknown error'}</div>`;
+          }
+          return;
+        }
       }
       
     } catch (error) {
       console.error('[Dashboard] Progress polling error:', error);
       // Don't stop polling on individual errors, just log them
+      // But increment 404 counter for network errors that might indicate session issues
+      if (error.message && error.message.includes('404')) {
+        consecutive404s++;
+      }
     }
   }, 1000); // Poll every second
 }
@@ -1009,6 +1557,23 @@ async function loadAnalyseFinalResults(sessionId) {
       if (result.report_path) {
         addDownloadReportButton(sessionId);
       }
+      
+      // Refresh the history list after analysis completion
+      console.log('[Dashboard] Refreshing history after analysis completion...');
+      if (typeof window.handleHistorySortFilter === 'function') {
+        await window.handleHistorySortFilter();
+      } else {
+        // Fallback to direct API call
+        try {
+          const response = await fetch('http://localhost:5001/api/history');
+          const data = await response.json();
+          if (data.status === 'success' && data.history) {
+            await window.handleHistorySortFilter();
+          }
+        } catch (error) {
+          console.error('[Dashboard] Error refreshing history:', error);
+        }
+      }
     }
   } catch (error) {
     console.error('[Dashboard] Error loading final results:', error);
@@ -1072,9 +1637,17 @@ function addDownloadReportButton(sessionId) {
   const chainContent = processChain.querySelector('.process-chain-content');
   if (chainContent) {
     chainContent.appendChild(downloadBtn);
+    // Scroll to button to make it visible
+    setTimeout(() => {
+      downloadBtn.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
   } else {
     // If no chain content, append directly to process chain
     processChain.appendChild(downloadBtn);
+    // Scroll to button to make it visible
+    setTimeout(() => {
+      downloadBtn.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
   }
   
   console.log('[Dashboard] Download report button added to process chain');
@@ -1232,7 +1805,8 @@ async function loadPdfViewer(pdfPath) {
   filePath = filePath.replace(/^[\/\\]+/, '');
   
   // Use /api/download endpoint which properly serves PDFs with correct MIME type
-  const pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(filePath)}`;
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
+  const pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(filePath)}&user_type=${userType}`;
   
   console.log('[Dashboard] Loading PDF from URL:', pdfUrl);
   
@@ -1497,7 +2071,7 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
       outputDiv.appendChild(markingsDiv);
     }
     
-    // Handle dimension step - show brief summary, visualization shown separately
+    // Handle dimension step - show brief summary and visualization
     if (stepKey === 'dimension' && stepOutput && Object.keys(stepOutput).length > 0) {
       const summaryDiv = document.createElement('div');
       summaryDiv.style.marginTop = '12px';
@@ -1514,6 +2088,50 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
         }
       }
       outputDiv.appendChild(summaryDiv);
+      
+      // Show visualization if available in step.visualization
+      if (step.visualization) {
+        const vizDiv = document.createElement('div');
+        vizDiv.style.marginTop = '12px';
+        vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Dimension Visualization:</strong>';
+        const img = document.createElement('img');
+        let imgUrl;
+        const vizPath = step.visualization;
+        if (vizPath.startsWith('http')) {
+          imgUrl = vizPath;
+        } else {
+          // Clean path - remove api_results prefix if present
+          const cleanPath = vizPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+          const userType = localStorage.getItem('authentIC_userType') || 'business';
+          imgUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+        }
+        img.src = imgUrl;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.borderRadius = '6px';
+        img.style.marginTop = '8px';
+        img.style.border = '1px solid var(--border)';
+        img.onerror = function() {
+          console.error('[Dashboard] Failed to load dimension visualization:', vizPath, 'tried URL:', imgUrl);
+          // Try alternative path formats
+          const filename = vizPath.split(/[\/\\]/).pop();
+          const userType = localStorage.getItem('authentIC_userType') || 'business';
+          const altUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(filename)}&user_type=${userType}`;
+          console.log('[Dashboard] Trying alternative dimension viz path:', altUrl);
+          this.src = altUrl;
+          this.onerror = () => {
+            this.style.display = 'none';
+            const errorMsg = document.createElement('div');
+            errorMsg.style.color = 'var(--muted, #6b7280)';
+            errorMsg.style.padding = '8px';
+            errorMsg.style.fontSize = '0.9em';
+            errorMsg.textContent = 'Dimension visualization not available';
+            vizDiv.appendChild(errorMsg);
+          };
+        };
+        vizDiv.appendChild(img);
+        outputDiv.appendChild(vizDiv);
+      }
     }
     
     // Handle parse step - show diagram image, dimensions table, and PDF download
@@ -1536,7 +2154,8 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
         const diagramPath = stepOutput.mechanical_diagram;
         // Use /api/download endpoint for all images
         const cleanPath = diagramPath.replace(/^.*api_results[\/\\]/, '');
-        img.src = diagramPath.startsWith('http') ? diagramPath : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
+        const userType = localStorage.getItem('authentIC_userType') || 'business';
+        img.src = diagramPath.startsWith('http') ? diagramPath : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
         img.style.borderRadius = '6px';
@@ -1625,19 +2244,42 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
         downloadBtn.style.width = '100%';
         downloadBtn.textContent = '📄 Download Datasheet PDF';
         downloadBtn.onclick = () => {
-          // Convert relative path to absolute URL
+          // Convert path to use /api/download endpoint
           const pdfPath = stepOutput.datasheet_path;
-          // Try different path formats
           let pdfUrl;
+          let cleanPath = '';
           if (pdfPath.startsWith('http')) {
             pdfUrl = pdfPath;
-          } else if (pdfPath.startsWith('/')) {
-            pdfUrl = `http://localhost:5001${pdfPath}`;
           } else {
-            // Try api_results path
-            const cleanPath = pdfPath.replace(/^.*\/([^\/]+\.pdf)$/, '$1');
-            pdfUrl = `http://localhost:5001/api_results/datasheets/${encodeURIComponent(cleanPath)}`;
+            // Extract relative path from api_results
+            cleanPath = pdfPath;
+            // Handle absolute paths - extract relative to api_results
+            // First, normalize the path separators
+            const normalizedPath = pdfPath.replace(/\\/g, '/');
+            
+            if (normalizedPath.includes('api_results')) {
+              // Extract everything after api_results
+              const parts = normalizedPath.split('api_results');
+              cleanPath = parts[parts.length - 1].replace(/^\/+/, '');
+            } else if (normalizedPath.includes('datasheets')) {
+              // Extract relative path from datasheets folder
+              const datasheetIndex = normalizedPath.indexOf('datasheets');
+              cleanPath = normalizedPath.substring(datasheetIndex);
+            } else {
+              // Try to find datasheets in path or use filename
+              const filename = normalizedPath.split('/').pop();
+              if (normalizedPath.toLowerCase().includes('datasheet') || normalizedPath.toLowerCase().endsWith('.pdf')) {
+                cleanPath = `datasheets/${filename}`;
+              } else {
+                cleanPath = filename;
+              }
+            }
+            // Use buildDownloadUrl helper (or construct manually with user_type)
+            const userType = localStorage.getItem('authentIC_userType') || 'business';
+            pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
           }
+          console.log('[Dashboard] Downloading datasheet from:', pdfUrl, '(original path:', pdfPath, ', clean path:', cleanPath, ')');
+          // Open in new window - browser will handle download
           window.open(pdfUrl, '_blank');
         };
         pdfDiv.appendChild(downloadBtn);
@@ -1700,7 +2342,8 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
     body.appendChild(outputDiv);
   }
   
-  if (step.visualization) {
+  // Show visualization if available (but skip for dimension step - already shown above)
+  if (step.visualization && stepKey !== 'dimension') {
     const vizDiv = document.createElement('div');
     vizDiv.className = 'step-preview-section';
     vizDiv.innerHTML = `<strong>Visualization:</strong>`;
@@ -1719,7 +2362,8 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
     } else {
       // Clean path - remove api_results prefix if present
       const cleanPath = vizPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
-      imgSrc = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
+      const userType = localStorage.getItem('authentIC_userType') || 'business';
+      imgSrc = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
     }
     
     img.src = imgSrc;
@@ -2113,6 +2757,10 @@ async function handleProcessLotSubmit(event) {
       formData.append('additional_info', infoInput.value.trim());
     }
     
+    // Get user type and add to form data
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    formData.append('user_type', userType);
+    
     // Call API
     const response = await fetch('http://localhost:5001/api/detect', {
       method: 'POST',
@@ -2134,10 +2782,18 @@ async function handleProcessLotSubmit(event) {
     // Reset form
     resetProcessLotForm();
     
-    // Reload history to show new entry
-    historyPage = 0;
-    hasMoreHistory = true;
-    loadProcessedHistory(true);
+    // Reload history to show new entry (only for personal users)
+    // userType already declared above, just reuse it
+    if (userType !== 'business') {
+      historyPage = 0;
+      hasMoreHistory = true;
+      loadProcessedHistory(true);
+    } else {
+      // Business users - reload via history-manager
+      if (typeof window.historyManager !== 'undefined' && typeof window.historyManager.loadHistory === 'function') {
+        window.historyManager.loadHistory();
+      }
+    }
     
     // Show success message
     showNotification('Lot processing started successfully!', 'success');
@@ -2353,6 +3009,13 @@ function resetAnalyseForm() {
 
 // Processed History loading
 async function loadProcessedHistory(reset = false) {
+  // For business users, don't use this old function - use history-manager.js instead
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'business') {
+    console.log('[Dashboard] Business user detected, skipping old loadProcessedHistory - using history-manager.js');
+    return;
+  }
+  
   if (isLoadingHistory || (!hasMoreHistory && !reset)) return;
   
   isLoadingHistory = true;
@@ -2447,6 +3110,13 @@ async function getProcessedHistory(page, filters) {
 }
 
 function renderHistoryCards(history) {
+  // For business users, let history-manager.js handle rendering
+  const userType = localStorage.getItem('authentIC_userType');
+  if (userType === 'business') {
+    console.log('[Dashboard] Business user detected, skipping old renderHistoryCards');
+    return;
+  }
+  
   const container = document.getElementById('processedHistoryList');
   if (!container) return;
   
@@ -2481,39 +3151,102 @@ function createHistoryCard(item) {
     icImageUrl = `http://localhost:5001/api_results/uploads/${item.session_id}_0_*.png`;
   }
   
+  const dateObj = item.timestamp || item.created_at ? new Date(item.timestamp || item.created_at) : null;
+  const processedDate = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+  const processedTime = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  let verdict = item.verdict || 'UNKNOWN';
+  // Normalize verdict text - condense long verdicts
+  if (verdict.toUpperCase().includes('SUSPICIOUS') && verdict.includes('REQUIRES')) {
+    verdict = 'SUSPICIOUS';
+  }
+  const verdictClass = verdict ? (verdict.toUpperCase().includes('AUTHENTIC') ? 'verdict-authentic' :
+                                       verdict.toUpperCase().includes('SUSPICIOUS') ? 'verdict-suspicious' :
+                                       verdict.toUpperCase().includes('COUNTERFEIT') ? 'verdict-counterfeit' : 'verdict-unknown') : 'verdict-unknown';
+  
+  // Extract IC info - handle both formats
+  const icInfo = item.ic_info || {};
+  const coo = item.coo || icInfo.coo || 'Unknown';
+  const dateCodes = icInfo.date_codes || [];
+  const lotCodes = icInfo.lot_codes || [];
+  const packageType = icInfo.package_type || null;
+  const tempGrade = icInfo.temperature_grade || null;
+  const speedGrade = icInfo.speed_grade || null;
+  
+  // Format year from date codes
+  let year = null;
+  if (dateCodes.length > 0 && dateCodes[0]) {
+    const dateCode = dateCodes[0];
+    if (typeof dateCode === 'object' && dateCode.decoded) {
+      const yearMatch = dateCode.decoded.match(/Year\s+(\d{4})/);
+      if (yearMatch) {
+        year = yearMatch[1];
+      }
+    } else if (typeof dateCode === 'string') {
+      const rawYear = dateCode.substring(0, 2);
+      if (rawYear) {
+        const yearNum = parseInt(rawYear);
+        if (yearNum >= 0 && yearNum <= 99) {
+          year = yearNum < 50 ? `20${rawYear}` : `19${rawYear}`;
+        }
+      }
+    }
+  }
+  
+  // Format lot/batch
+  let lot = null;
+  if (lotCodes.length > 0 && lotCodes[0]) {
+    if (typeof lotCodes[0] === 'object' && lotCodes[0].raw) {
+      lot = lotCodes[0].raw;
+    } else if (typeof lotCodes[0] === 'string') {
+      lot = lotCodes[0];
+    }
+  }
+  
+  // Build additional info string
+  const additionalInfo = [];
+  if (lot) additionalInfo.push(`Lot: ${lot}`);
+  if (year) additionalInfo.push(`Year: ${year}`);
+  if (packageType && packageType !== 'UNKNOWN') {
+    const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+    if (pkgMatch) {
+      additionalInfo.push(`Pkg: ${pkgMatch[1]}`);
+    }
+  }
+  if (tempGrade) additionalInfo.push(`Temp: ${tempGrade}`);
+  if (speedGrade) additionalInfo.push(`Speed: ${speedGrade}`);
+  
   card.innerHTML = `
-    <div class="history-card-image">
-      <img src="${icImageUrl}" alt="${item.part_number || 'IC'}" 
-           onerror="this.src='assets/logo.png'; this.onerror=null;">
+    <div class="history-card-left">
+      <div class="history-card-image">
+        <img src="${icImageUrl}" alt="${item.part_number || 'IC'}" 
+             onerror="this.src='assets/logo.png'; this.onerror=null;">
+      </div>
+      <div class="history-card-score">
+        <span class="score-label">Score:</span>
+        <span class="score-value">${item.authenticity_score !== null && item.authenticity_score !== undefined ? item.authenticity_score.toFixed(1) : 'N/A'}</span>
+      </div>
     </div>
     <div class="history-card-content">
       <div class="history-card-header">
-        <h3>${item.part_number || 'Unknown'}</h3>
-        <span class="authenticity-badge ${authenticityClass}">${item.verdict || 'UNKNOWN'}</span>
+        <h5 class="history-card-title">${item.part_number || 'Unknown'}</h5>
+        <span class="history-card-manufacturer">${item.manufacturer || 'N/A'}</span>
       </div>
-      <div class="history-card-details">
-        <div class="detail-item">
-          <span class="detail-label">Score:</span>
-          <span class="detail-value">${item.authenticity_score !== null && item.authenticity_score !== undefined ? item.authenticity_score : 'N/A'}/100</span>
+      <div class="history-card-meta">
+        <div class="history-card-date">
+          <span>${processedDate}</span>
+          ${processedTime ? `<span class="history-card-time">${processedTime}</span>` : ''}
         </div>
-        <div class="detail-item">
-          <span class="detail-label">Manufacturer:</span>
-          <span class="detail-value">${item.manufacturer || 'N/A'}</span>
+        <div class="history-card-coo-pkg">
+          ${coo !== 'Unknown' ? `<span class="history-card-coo">COO: ${coo}</span>` : ''}
+          ${packageType && packageType !== 'UNKNOWN' ? (() => {
+            const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+            return pkgMatch ? `<span class="history-card-pkg">Pkg: ${pkgMatch[1]}</span>` : '';
+          })() : ''}
         </div>
-        <div class="detail-item">
-          <span class="detail-label">Package:</span>
-          <span class="detail-value">${item.package_type || 'N/A'}</span>
-        </div>
-        ${item.pin_count ? `
-        <div class="detail-item">
-          <span class="detail-label">Pins:</span>
-          <span class="detail-value">${item.pin_count}</span>
-        </div>
-        ` : ''}
-        <div class="detail-item">
-          <span class="detail-label">Date:</span>
-          <span class="detail-value">${formatDate(item.timestamp || item.created_at)}</span>
-        </div>
+        ${additionalInfo.filter(info => !info.startsWith('Pkg:')).length > 0 ? `<div class="history-card-additional">${additionalInfo.filter(info => !info.startsWith('Pkg:')).join(' • ')}</div>` : ''}
+      </div>
+      <div class="history-card-verdict-container">
+        <span class="history-card-verdict ${verdictClass}">${verdict}</span>
       </div>
     </div>
   `;
@@ -2528,7 +3261,580 @@ function formatDate(dateString) {
 }
 
 // History detail modal
-function openHistoryDetail(item) {
+// Helper function to wait for openHistoryDetailModal to be available
+function waitForHistoryDetailModal(sessionId, maxAttempts = 50, delay = 100) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    const checkFunction = () => {
+      attempts++;
+      
+      // Check if function exists and is actually a function (not just defined)
+      if (typeof window.openHistoryDetailModal === 'function') {
+        // Verify it's not the simple version by checking the function string
+        const funcStr = window.openHistoryDetailModal.toString();
+        if (funcStr.includes('[History Detail SIMPLE]')) {
+          // Simple version is still active, wait a bit more for full version
+          if (attempts < maxAttempts) {
+            setTimeout(checkFunction, delay);
+            return;
+          }
+        }
+        console.log('[Dashboard] openHistoryDetailModal is now available');
+        resolve();
+      } else if (attempts >= maxAttempts) {
+        console.error('[Dashboard] openHistoryDetailModal not available after', maxAttempts, 'attempts');
+        console.error('[Dashboard] Available functions:', Object.keys(window).filter(k => k.includes('History')));
+        console.error('[Dashboard] window.openHistoryDetailModal type:', typeof window.openHistoryDetailModal);
+        // Try to use simple version as fallback if available
+        if (typeof window.renderHistoryDetailFull === 'function') {
+          console.warn('[Dashboard] Using fallback: renderHistoryDetailFull is available');
+          resolve(); // Resolve anyway, we can work with the simple version
+        } else {
+          reject(new Error('History detail modal not available'));
+        }
+      } else {
+        setTimeout(checkFunction, delay);
+      }
+    };
+    
+    checkFunction();
+  });
+}
+
+// Basic history detail renderer (fallback when full renderer not available)
+function renderBasicHistoryDetail(content, detail, sessionId) {
+  if (!content || !detail) return;
+  
+  const icInfo = detail.ic_info || {};
+  const analysis = detail.analysis || {};
+  const filePaths = detail.file_paths || {};
+  const toolOutputs = analysis.tool_outputs || {};
+  const partNumber = icInfo.part_number || 'UNKNOWN';
+  const manufacturer = icInfo.manufacturer || 'UNKNOWN';
+  const processedDate = detail.processed_date ? new Date(detail.processed_date).toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }) : '';
+  let verdict = detail.verdict || 'UNKNOWN';
+  // Normalize verdict text - condense long verdicts
+  if (verdict.toUpperCase().includes('SUSPICIOUS') && verdict.includes('REQUIRES')) {
+    verdict = 'SUSPICIOUS';
+  }
+  const score = detail.scores?.authenticity_score || 0;
+  
+  // Build tabs HTML in the specified order
+  let tabsHTML = `
+    <button class="tab-btn active" onclick="switchBasicTab('ic-identification')">IC Identification</button>
+    <button class="tab-btn" onclick="switchBasicTab('oem-datasheet')">OEM Datasheet</button>
+  `;
+  if (toolOutputs.parse) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('parsed-datasheet')">Parsed Datasheet</button>`;
+  if (analysis.dimension_analysis) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('dimension')">Dimension Analysis</button>`;
+  if (analysis.visual_comparison) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('visual')">Visual Analysis</button>`;
+  tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('report')">Report</button>`;
+  
+  content.innerHTML = `
+    <div class="history-detail-header">
+      <div class="history-detail-title">
+        <h2>${escapeHtml(partNumber)}</h2>
+        <p class="history-detail-subtitle">${escapeHtml(manufacturer)} • ${processedDate}</p>
+        <p class="history-detail-verdict">${escapeHtml(verdict)} (Score: ${score.toFixed(1)}/100)</p>
+      </div>
+      <div class="history-detail-actions">
+        <button class="btn-download" data-session-id="${sessionId}" id="downloadBtn-${sessionId}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download PDF
+        </button>
+        <button class="btn-delete" data-session-id="${sessionId}" id="deleteBtn-${sessionId}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+          Delete
+        </button>
+      </div>
+    </div>
+    <div class="history-detail-tabs">
+      ${tabsHTML}
+    </div>
+    <div class="history-detail-tab-content" id="basicTabContent">
+      ${renderBasicTabContent('ic-identification', detail, analysis, filePaths, toolOutputs)}
+    </div>
+  `;
+  
+  // Attach event listeners to buttons after HTML is inserted
+  // Use requestAnimationFrame to ensure DOM is ready
+  requestAnimationFrame(() => {
+    const downloadBtn = document.getElementById(`downloadBtn-${sessionId}`);
+    const deleteBtn = document.getElementById(`deleteBtn-${sessionId}`);
+    
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const sid = this.getAttribute('data-session-id');
+        console.log('[Dashboard] Download button clicked for session:', sid);
+        if (typeof window.downloadHistoryReport === 'function') {
+          window.downloadHistoryReport(sid);
+        } else {
+          console.warn('[Dashboard] downloadHistoryReport not available, using direct open');
+          window.open(`http://localhost:5001/api/history/${encodeURIComponent(sid)}/download`, '_blank');
+        }
+      });
+    } else {
+      console.error('[Dashboard] Download button not found:', `downloadBtn-${sessionId}`);
+    }
+    
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const sid = this.getAttribute('data-session-id');
+        console.log('[Dashboard] Delete button clicked for session:', sid);
+        console.log('[Dashboard] deleteHistoryEntry available?', typeof window.deleteHistoryEntry);
+        if (typeof window.deleteHistoryEntry === 'function') {
+          window.deleteHistoryEntry(sid);
+        } else {
+          console.error('[Dashboard] deleteHistoryEntry function not available');
+          console.error('[Dashboard] Available window functions:', Object.keys(window).filter(k => k.includes('delete') || k.includes('Delete')));
+          alert('Delete function not available. Please refresh the page.');
+        }
+      });
+    } else {
+      console.error('[Dashboard] Delete button not found:', `deleteBtn-${sessionId}`);
+    }
+  });
+  
+  // Store detail for tab switching
+  window.currentBasicHistoryDetail = { detail, analysis, filePaths, toolOutputs };
+}
+
+function renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs) {
+  const icInfo = detail.ic_info || {};
+  const identifyData = toolOutputs.identify?.data || toolOutputs.identify || {};
+  const parseData = toolOutputs.parse?.data || toolOutputs.parse || {};
+  const oemInfo = analysis.oem_info || {};
+  
+  switch(tabName) {
+    case 'ic-identification':
+      const primaryImage = filePaths.primary_image;
+      const lotCodes = identifyData.lot_codes || icInfo.lot_codes || [];
+      const dateCodes = identifyData.date_codes || icInfo.date_codes || [];
+      const countryCodes = identifyData.country_codes || [];
+      
+      return `
+        <div class="tab-content-section">
+          ${primaryImage ? `
+            <div class="ic-image-preview">
+              <img src="http://localhost:5001/api_results/${primaryImage}" alt="IC Image" class="ic-preview-img">
+            </div>
+          ` : ''}
+          <div class="detail-grid-minimal">
+            <div class="detail-item-minimal">
+              <span class="detail-label">Part Number</span>
+              <span class="detail-value">${escapeHtml(icInfo.part_number || 'UNKNOWN')}</span>
+            </div>
+            <div class="detail-item-minimal">
+              <span class="detail-label">Manufacturer</span>
+              <span class="detail-value">${escapeHtml(icInfo.manufacturer || 'UNKNOWN')}</span>
+            </div>
+            <div class="detail-item-minimal">
+              <span class="detail-label">Package Type</span>
+              <span class="detail-value">${escapeHtml(icInfo.package_type || 'UNKNOWN')}</span>
+            </div>
+            <div class="detail-item-minimal">
+              <span class="detail-label">Pin Count</span>
+              <span class="detail-value">${icInfo.pin_count || 0}</span>
+            </div>
+            ${icInfo.coo ? `
+              <div class="detail-item-minimal">
+                <span class="detail-label">Country of Origin</span>
+                <span class="detail-value">${escapeHtml(icInfo.coo)}</span>
+              </div>
+            ` : ''}
+            ${identifyData.temperature_grade ? `
+              <div class="detail-item-minimal">
+                <span class="detail-label">Temperature Grade</span>
+                <span class="detail-value">${escapeHtml(identifyData.temperature_grade)}</span>
+              </div>
+            ` : ''}
+            ${identifyData.speed_grade ? `
+              <div class="detail-item-minimal">
+                <span class="detail-label">Speed Grade</span>
+                <span class="detail-value">${escapeHtml(identifyData.speed_grade)}</span>
+              </div>
+            ` : ''}
+            ${identifyData.package_variant ? `
+              <div class="detail-item-minimal">
+                <span class="detail-label">Package Variant</span>
+                <span class="detail-value">${escapeHtml(identifyData.package_variant)}</span>
+              </div>
+            ` : ''}
+          </div>
+          ${lotCodes.length > 0 ? `
+            <div class="codes-section">
+              <h4>Lot Codes</h4>
+              <div class="codes-list">
+                ${lotCodes.map(lot => `
+                  <div class="code-item">
+                    <div class="code-value">${escapeHtml(lot.raw || lot)}</div>
+                    ${lot.meaning ? `<div class="code-meaning">${escapeHtml(lot.meaning)}</div>` : ''}
+                    ${lot.location ? `<div class="code-location">${escapeHtml(lot.location)}</div>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          ${dateCodes.length > 0 ? `
+            <div class="codes-section">
+              <h4>Date Codes</h4>
+              <div class="codes-list">
+                ${dateCodes.map(date => `
+                  <div class="code-item">
+                    <div class="code-value">${escapeHtml(date.raw || date)}</div>
+                    ${date.decoded ? `<div class="code-meaning">${escapeHtml(date.decoded)}</div>` : ''}
+                    ${date.format ? `<div class="code-format">Format: ${escapeHtml(date.format)}</div>` : ''}
+                    ${date.location ? `<div class="code-location">${escapeHtml(date.location)}</div>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          ${countryCodes.length > 0 ? `
+            <div class="codes-section">
+              <h4>Country Codes</h4>
+              <div class="codes-list">
+                ${countryCodes.map(cc => `
+                  <div class="code-item">
+                    <div class="code-value">${escapeHtml(cc)}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          ${identifyData.additional_markings && identifyData.additional_markings.length > 0 ? `
+            <div class="markings-section">
+              <h4>Additional Markings</h4>
+              <div class="markings-list">
+                ${identifyData.additional_markings.map(m => `
+                  <div class="marking-item">
+                    <div class="marking-type">${escapeHtml(m.type || 'Unknown')}</div>
+                    <div class="marking-text">${escapeHtml(m.text || '')}</div>
+                    <div class="marking-decoded">${escapeHtml(m.decoded || '')}</div>
+                    <div class="marking-location">${escapeHtml(m.location || '')}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    case 'oem-datasheet':
+      return `
+        <div class="tab-content-section">
+          ${filePaths.datasheet ? `
+            <div class="pdf-viewer-container">
+              <iframe src="http://localhost:5001/api_results/${filePaths.datasheet}" style="width: 100%; height: calc(100vh - 300px); border: none; border-radius: 8px;"></iframe>
+            </div>
+          ` : '<p class="empty-state">No datasheet available</p>'}
+        </div>
+      `;
+    case 'parsed-datasheet':
+      const parsedSpecs = parseData.parsed_specs || oemInfo.parsed_specs || {};
+      let mechanicalDiagram = parseData.mechanical_diagram || oemInfo.mechanical_diagram_path;
+      // Fix path - normalize to work with api_results endpoint
+      if (mechanicalDiagram) {
+        // Remove 'data/api_results/' prefix if present
+        if (mechanicalDiagram.startsWith('data/api_results/')) {
+          mechanicalDiagram = mechanicalDiagram.replace('data/api_results/', '');
+        }
+        // If it starts with 'diagrams/', keep it as is
+        // Otherwise, if it contains 'diagrams/', extract the part after 'diagrams/'
+        if (mechanicalDiagram.includes('diagrams/')) {
+          const diagramsIndex = mechanicalDiagram.indexOf('diagrams/');
+          mechanicalDiagram = mechanicalDiagram.substring(diagramsIndex);
+        }
+      }
+      return `
+        <div class="tab-content-section">
+          ${parsedSpecs.package_dimensions ? `
+            <div class="specs-table-container">
+              <h4>Package Dimensions</h4>
+              <table class="specs-table">
+                <tbody>
+                  ${parsedSpecs.package_dimensions.package_type ? `
+                    <tr>
+                      <td class="spec-label">Package Type</td>
+                      <td class="spec-value">${escapeHtml(parsedSpecs.package_dimensions.package_type)}</td>
+                    </tr>
+                  ` : ''}
+                  ${parsedSpecs.package_dimensions.length_mm ? `
+                    <tr>
+                      <td class="spec-label">Length</td>
+                      <td class="spec-value">${parsedSpecs.package_dimensions.length_mm} mm</td>
+                    </tr>
+                  ` : ''}
+                  ${parsedSpecs.package_dimensions.width_mm ? `
+                    <tr>
+                      <td class="spec-label">Width</td>
+                      <td class="spec-value">${parsedSpecs.package_dimensions.width_mm} mm</td>
+                    </tr>
+                  ` : ''}
+                  ${parsedSpecs.package_dimensions.height_mm ? `
+                    <tr>
+                      <td class="spec-label">Height</td>
+                      <td class="spec-value">${parsedSpecs.package_dimensions.height_mm} mm</td>
+                    </tr>
+                  ` : ''}
+                  ${parsedSpecs.package_dimensions.pin_pitch_mm ? `
+                    <tr>
+                      <td class="spec-label">Pin Pitch</td>
+                      <td class="spec-value">${parsedSpecs.package_dimensions.pin_pitch_mm} mm</td>
+                    </tr>
+                  ` : ''}
+                  ${parsedSpecs.package_dimensions.pin_count ? `
+                    <tr>
+                      <td class="spec-label">Pin Count</td>
+                      <td class="spec-value">${parsedSpecs.package_dimensions.pin_count}</td>
+                    </tr>
+                  ` : ''}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+          ${mechanicalDiagram ? `
+            <div class="dimension-preview-container">
+              <h4>Mechanical Diagram</h4>
+              <div class="dimension-preview">
+                <img src="http://localhost:5001/api_results/${encodeURIComponent(mechanicalDiagram)}" alt="Mechanical Diagram" class="dimension-preview-img" onerror="console.error('Failed to load diagram:', '${mechanicalDiagram}'); this.style.display='none';">
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    case 'dimension':
+      const dim = analysis.dimension_analysis || {};
+      const dimViz = filePaths.dimension_viz || (detail.progress && detail.progress.find(p => p.visualization)?.visualization);
+      return `
+        <div class="tab-content-section">
+          ${dimViz ? `
+            <div class="dimension-viz-container">
+              <img src="${dimViz.startsWith('http') ? dimViz : 'http://localhost:5001/api_results/' + dimViz}" alt="Dimension Visualization" class="dimension-viz-img">
+            </div>
+          ` : ''}
+          <div class="dimension-metrics">
+            ${dim.measured_aspect_ratio !== undefined ? `
+              <div class="metric-card">
+                <div class="metric-label">Measured Aspect Ratio</div>
+                <div class="metric-value">${dim.measured_aspect_ratio.toFixed(3)}</div>
+                ${dim.expected_aspect_ratio ? `
+                  <div class="metric-comparison">Expected: ${dim.expected_aspect_ratio.toFixed(3)}</div>
+                ` : ''}
+              </div>
+            ` : ''}
+            ${dim.confidence_score !== undefined ? `
+              <div class="metric-card">
+                <div class="metric-label">Confidence Score</div>
+                <div class="metric-value">${dim.confidence_score.toFixed(1)}</div>
+                <div class="metric-comparison">out of 100</div>
+              </div>
+            ` : ''}
+            ${dim.verdict ? `
+              <div class="metric-card">
+                <div class="metric-label">Verdict</div>
+                <div class="metric-value">${escapeHtml(dim.verdict)}</div>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    case 'visual':
+      const visual = analysis.visual_comparison || {};
+      const anomalies = analysis.anomalies || [];
+      return `
+        <div class="tab-content-section">
+          <div class="visual-metrics">
+            ${visual.text_quality_score !== undefined ? `
+              <div class="metric-card">
+                <div class="metric-label">Text Quality Score</div>
+                <div class="metric-value">${visual.text_quality_score.toFixed(1)}</div>
+                <div class="metric-comparison">out of 100</div>
+              </div>
+            ` : ''}
+            ${visual.pin_count_verified !== undefined ? `
+              <div class="metric-card">
+                <div class="metric-label">Pin Count Verified</div>
+                <div class="metric-value">${visual.pin_count_verified ? 'Yes' : 'No'}</div>
+              </div>
+            ` : ''}
+            ${visual.package_type_verified !== undefined ? `
+              <div class="metric-card">
+                <div class="metric-label">Package Type Verified</div>
+                <div class="metric-value">${visual.package_type_verified ? 'Yes' : 'No'}</div>
+              </div>
+            ` : ''}
+          </div>
+          ${anomalies.length > 0 ? `
+            <div class="anomalies-section">
+              <h4>Anomalies Detected (${anomalies.length})</h4>
+              <div class="anomalies-list">
+                ${anomalies.map((a, i) => `
+                  <div class="anomaly-card severity-${a.severity || 'medium'}">
+                    <div class="anomaly-header">
+                      <span class="anomaly-number">#${i+1}</span>
+                      <span class="anomaly-type">${escapeHtml(a.type || 'Unknown')}</span>
+                      <span class="anomaly-severity-badge">${escapeHtml(a.severity || 'medium')}</span>
+                    </div>
+                    <p class="anomaly-description">${escapeHtml(a.description || 'No description')}</p>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          ${visual.observations && visual.observations.length > 0 ? `
+            <div class="observations-section">
+              <h4>Observations</h4>
+              <ul class="observations-list">
+                ${visual.observations.map(obs => `<li>${escapeHtml(obs)}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    case 'report':
+      return `
+        <div class="tab-content-section">
+          ${filePaths.report_pdf ? `
+            <div class="pdf-viewer-container">
+              <iframe src="http://localhost:5001/api_results/${filePaths.report_pdf}" style="width: 100%; height: calc(100vh - 300px); border: none; border-radius: 8px;"></iframe>
+            </div>
+          ` : '<p class="empty-state">Report not available</p>'}
+        </div>
+      `;
+    default:
+      return '<div class="tab-content-section"><p class="empty-state">Content not available</p></div>';
+  }
+}
+
+window.switchBasicTab = function(tabName) {
+  const content = document.getElementById('basicTabContent');
+  if (!content || !window.currentBasicHistoryDetail) return;
+  
+  const { detail, analysis, filePaths, toolOutputs } = window.currentBasicHistoryDetail;
+  content.innerHTML = renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs);
+  
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.textContent.trim() === getBasicTabLabel(tabName)) {
+      btn.classList.add('active');
+    }
+  });
+};
+
+function getBasicTabLabel(tabName) {
+  const labels = {
+    'ic-identification': 'IC Identification',
+    'oem-datasheet': 'OEM Datasheet',
+    'parsed-datasheet': 'Parsed Datasheet',
+    'dimension': 'Dimension Analysis',
+    'visual': 'Visual Analysis',
+    'report': 'Report'
+  };
+  return labels[tabName] || tabName;
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Handle both: openHistoryDetail(sessionId) and openHistoryDetail(item)
+function openHistoryDetail(itemOrSessionId) {
+  // If it's a string, treat it as sessionId and use the history detail modal
+  if (typeof itemOrSessionId === 'string') {
+    const sessionId = itemOrSessionId;
+    console.log('[Dashboard] openHistoryDetail called with sessionId:', sessionId);
+    
+    // Try to use the function directly - it should be available from simple version
+    if (typeof window.openHistoryDetailModal === 'function') {
+      try {
+        window.openHistoryDetailModal(sessionId);
+        return;
+      } catch (error) {
+        console.error('[Dashboard] Error calling openHistoryDetailModal:', error);
+      }
+    }
+    
+    // Fallback: manually open modal and load data
+    console.warn('[Dashboard] openHistoryDetailModal not available, using direct approach');
+    const modal = document.getElementById('historyDetailModal');
+    if (!modal) {
+      console.error('[Dashboard] Modal element not found');
+      alert('History detail modal not found. Please refresh the page.');
+      return;
+    }
+    
+    const content = document.getElementById('historyDetailContent');
+    if (content) {
+      content.innerHTML = '<div class="loading">Loading details...</div>';
+    }
+    
+    modal.style.display = 'flex';
+    
+    // Load data directly
+    fetch(`http://localhost:5001/api/history/${sessionId}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        console.log('[Dashboard] History data loaded, attempting to render...');
+        console.log('[Dashboard] renderHistoryDetailFull available?', typeof window.renderHistoryDetailFull);
+        
+        // Extract the actual detail object
+        const detail = (data.status === 'success' && data.detail) ? data.detail : (data.detail || data);
+        
+        // Try to use renderHistoryDetailFull if available
+        if (typeof window.renderHistoryDetailFull === 'function') {
+          console.log('[Dashboard] Using renderHistoryDetailFull');
+          try {
+            window.renderHistoryDetailFull(detail);
+          } catch (error) {
+            console.error('[Dashboard] Error calling renderHistoryDetailFull:', error);
+            // Fall through to basic rendering
+            renderBasicHistoryDetail(content, detail, sessionId);
+          }
+        } else {
+          console.warn('[Dashboard] renderHistoryDetailFull not available, using basic renderer');
+          renderBasicHistoryDetail(content, detail, sessionId);
+        }
+      })
+      .catch(error => {
+        console.error('[Dashboard] Error loading history details:', error);
+        if (content) {
+          content.innerHTML = `<div class="error">Error loading details: ${error.message}</div>`;
+        }
+      });
+    
+    return;
+  }
+  
+  // Otherwise, treat it as an item object (old behavior for backward compatibility)
+  const item = itemOrSessionId;
   const modal = document.getElementById('historyDetailModal');
   const content = document.getElementById('historyDetailContent');
   
@@ -2545,66 +3851,147 @@ function openHistoryDetail(item) {
   modal.style.display = 'flex';
   
   // Load full details
-  loadHistoryDetails(item.session_id || item.id, content);
+  const sessionId = item.session_id || item.id;
+  if (sessionId) {
+    loadHistoryDetails(sessionId, content);
+  } else {
+    content.innerHTML = '<div class="error">Invalid session ID</div>';
+  }
 }
 
 async function loadHistoryDetails(sessionId, container) {
+  if (!sessionId || sessionId === 'undefined') {
+    container.innerHTML = '<div class="error">Invalid session ID</div>';
+    return;
+  }
+  
   try {
-    const response = await fetch(`http://localhost:5001/api/session/${sessionId}`);
-    const data = await response.json();
+    // Use the history API endpoint instead of session endpoint
+    const response = await fetch(`http://localhost:5001/api/history/${sessionId}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
     
-    if (data.status === 'completed' && data.results && data.results.length > 0) {
-      const result = data.results[0];
+    const data = await response.json();
+    console.log('[Dashboard] History detail response:', data);
+    
+    // Handle the history API response format
+    if (data.status === 'success' && data.detail) {
+      // Use the history detail modal to render
+      const closeAndOpenModal = () => {
+        const modal = document.getElementById('historyDetailModal');
+        if (modal) {
+          modal.style.display = 'none';
+        }
+        window.openHistoryDetailModal(sessionId);
+      };
       
-      // Get the chat response which contains process chain and summary
-      if (result.chat_response && Array.isArray(result.chat_response)) {
-        const summaryMsg = result.chat_response.find(m => m.type === 'summary');
-        
-        // Build process chain HTML from session progress
-        const processChainHTML = buildProcessChainHTML(data.progress || []);
-        
-        // Render process chain and summary with navigation
-        container.innerHTML = `
-          <div class="history-detail-view" data-view="summary">
-            <div class="detail-process-chain" style="display: none;">
-              ${processChainHTML}
-            </div>
-            <div class="detail-summary">
-              ${summaryMsg ? formatSummaryContent(summaryMsg.content) : 'Summary not available'}
-              ${result.report_path ? `
-                <div style="margin-top: 20px;">
-                  <a href="http://localhost:5001/api/report/${sessionId}" target="_blank" class="download-report-btn" style="display: inline-block;">
-                    📄 Download Full Report (PDF)
-                  </a>
-                </div>
-              ` : ''}
-            </div>
-            <div class="detail-navigation">
-              <button class="nav-btn nav-prev" onclick="switchDetailView('chain')">← Process Chain</button>
-              <span class="nav-indicator">2/2</span>
-              <button class="nav-btn nav-next" disabled>Summary →</button>
-            </div>
-          </div>
-        `;
+      if (typeof window.openHistoryDetailModal === 'function') {
+        closeAndOpenModal();
+        return;
       } else {
-        // Fallback: render basic info
-        container.innerHTML = `
-          <div class="detail-basic">
-            <h3>${result.part_number || 'Unknown'}</h3>
-            <p><strong>Verdict:</strong> ${result.verdict || 'N/A'}</p>
-            <p><strong>Score:</strong> ${result.score || 0}/100</p>
-            <p><strong>Manufacturer:</strong> ${result.manufacturer || 'N/A'}</p>
-            <p><strong>Package Type:</strong> ${result.package_type || 'N/A'}</p>
-            ${result.report_path ? `<a href="http://localhost:5001/api/report/${sessionId}" target="_blank" class="download-report-btn">Download Report</a>` : ''}
-          </div>
-        `;
+        waitForHistoryDetailModal(sessionId)
+          .then(() => {
+            closeAndOpenModal();
+          })
+          .catch((error) => {
+            console.error('[Dashboard] Failed to load history detail modal:', error);
+            container.innerHTML = '<div class="error">History detail modal not available. Please refresh the page.</div>';
+          });
+        return;
       }
-    } else {
-      container.innerHTML = '<div class="detail-error"><p>Details not available</p></div>';
+    } else if (data && (data.metadata || data.analysis)) {
+      // Direct detail object
+      const closeAndOpenModal = () => {
+        const modal = document.getElementById('historyDetailModal');
+        if (modal) {
+          modal.style.display = 'none';
+        }
+        window.openHistoryDetailModal(sessionId);
+      };
+      
+      if (typeof window.openHistoryDetailModal === 'function') {
+        closeAndOpenModal();
+        return;
+      } else {
+        waitForHistoryDetailModal(sessionId)
+          .then(() => {
+            closeAndOpenModal();
+          })
+          .catch((error) => {
+            console.error('[Dashboard] Failed to load history detail modal:', error);
+            container.innerHTML = '<div class="error">History detail modal not available. Please refresh the page.</div>';
+          });
+        return;
+      }
+    }
+    
+    // If we got here, history API didn't return expected format
+    // Try session endpoint as fallback (for old format)
+    try {
+      const sessionResponse = await fetch(`http://localhost:5001/api/session/${sessionId}`);
+      if (sessionResponse.ok) {
+        const sessionData = await sessionResponse.json();
+        
+        if (sessionData.status === 'completed' && sessionData.results && sessionData.results.length > 0) {
+          const result = sessionData.results[0];
+          
+          // Get the chat response which contains process chain and summary
+          if (result.chat_response && Array.isArray(result.chat_response)) {
+            const summaryMsg = result.chat_response.find(m => m.type === 'summary');
+            
+            // Build process chain HTML from session progress
+            const processChainHTML = buildProcessChainHTML(sessionData.progress || []);
+        
+            // Render process chain and summary with navigation
+            container.innerHTML = `
+              <div class="history-detail-view" data-view="summary">
+                <div class="detail-process-chain" style="display: none;">
+                  ${processChainHTML}
+                </div>
+                <div class="detail-summary">
+                  ${summaryMsg ? formatSummaryContent(summaryMsg.content) : 'Summary not available'}
+                  ${result.report_path ? `
+                    <div style="margin-top: 20px;">
+                      <a href="http://localhost:5001/api/report/${sessionId}" target="_blank" class="download-report-btn" style="display: inline-block;">
+                        📄 Download Full Report (PDF)
+                      </a>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="detail-navigation">
+                  <button class="nav-btn nav-prev" onclick="switchDetailView('chain')">← Process Chain</button>
+                  <span class="nav-indicator">2/2</span>
+                  <button class="nav-btn nav-next" disabled>Summary →</button>
+                </div>
+              </div>
+            `;
+          } else {
+            // Fallback: render basic info
+            container.innerHTML = `
+              <div class="detail-basic">
+                <h3>${result.part_number || 'Unknown'}</h3>
+                <p><strong>Verdict:</strong> ${result.verdict || 'N/A'}</p>
+                <p><strong>Score:</strong> ${result.score || 0}/100</p>
+                <p><strong>Manufacturer:</strong> ${result.manufacturer || 'N/A'}</p>
+                <p><strong>Package Type:</strong> ${result.package_type || 'N/A'}</p>
+                ${result.report_path ? `<a href="http://localhost:5001/api/report/${sessionId}" target="_blank" class="download-report-btn">Download Report</a>` : ''}
+              </div>
+            `;
+          }
+        } else {
+          container.innerHTML = '<div class="detail-error"><p>Details not available from session endpoint</p></div>';
+        }
+      } else {
+        container.innerHTML = '<div class="detail-error"><p>Failed to load details from both endpoints</p></div>';
+      }
+    } catch (sessionError) {
+      console.error('[Dashboard] Error loading from session endpoint:', sessionError);
+      container.innerHTML = '<div class="detail-error"><p>Failed to load details. Please try again.</p></div>';
     }
   } catch (error) {
-    console.error('[Dashboard] Error loading details:', error);
-    container.innerHTML = '<div class="detail-error"><p>Failed to load details</p></div>';
+    console.error('[Dashboard] Error loading history details:', error);
+    container.innerHTML = `<div class="detail-error"><p>Failed to load details: ${error.message || 'Unknown error'}</p></div>`;
   }
 }
 
@@ -2793,6 +4180,53 @@ window.closeHistoryDetailModal = function() {
   }
 };
 
+// Delete history card function (for cards in side panel)
+window.deleteHistoryCard = async function(sessionId) {
+  if (!confirm('Are you sure you want to delete this history entry? This action cannot be undone.')) {
+    return;
+  }
+  
+  try {
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    const response = await fetch(`http://localhost:5001/api/history/${sessionId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-User-Type': userType
+      }
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.status === 'success') {
+      // Remove the card from DOM immediately with animation
+      const card = document.querySelector(`.history-card[data-session-id="${sessionId}"]`);
+      if (card) {
+        card.style.transition = 'opacity 0.3s, transform 0.3s';
+        card.style.opacity = '0';
+        card.style.transform = 'translateX(-20px)';
+        setTimeout(() => {
+          card.remove();
+        }, 300);
+      }
+      
+      // Reload history to refresh the list
+      if (typeof window.historyManager !== 'undefined' && typeof window.historyManager.loadHistory === 'function') {
+        window.historyManager.loadHistory();
+      } else if (typeof window.loadHistory === 'function') {
+        window.loadHistory();
+      }
+      
+      // Show success message
+      console.log('[Dashboard] Card deleted successfully');
+    } else {
+      throw new Error(data.error || 'Failed to delete history entry');
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error deleting history card:', error);
+    alert('Failed to delete history entry: ' + error.message);
+  }
+};
+
 // Toggle sidebar
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -2817,8 +4251,12 @@ window.removePdf = removePdf;
 window.removeAnalysePdf = removeAnalysePdf;
 window.handleProcessLotSubmit = handleProcessLotSubmit;
 // window.handleAnalyseSubmit is already defined above as window.handleAnalyseSubmit
-window.openHistoryDetail = openHistoryDetail;
-window.closeAnalyseView = closeAnalyseView;
+// Only expose openHistoryDetail if it's not already set by history-manager.js
+// history-manager.js should handle history cards, this is for backward compatibility
+if (typeof window.openHistoryDetail === 'undefined') {
+  window.openHistoryDetail = openHistoryDetail;
+}
+// closeAnalyseView removed - not needed
 window.toggleSidebar = toggleSidebar;
 window.showStepPreview = showStepPreview;
 window.adjustPdfZoom = adjustPdfZoom;

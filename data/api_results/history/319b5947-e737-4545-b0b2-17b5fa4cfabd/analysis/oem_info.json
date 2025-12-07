@@ -1,0 +1,16 @@
+{
+  "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/STM32F107RCT7_tavily.pdf",
+  "mechanical_diagram_path": "data/api_results/diagrams/STM32F107RCT7_tavily_mechanical_LQFP-64 (Low-profile Quad Flat Package)_page88.png",
+  "parsed_specs": {
+    "package_dimensions": {
+      "length_mm": 10.0,
+      "width_mm": 10.0,
+      "height_mm": 1.6,
+      "pin_count": 64,
+      "pin_pitch_mm": 0.5,
+      "package_type": "LQFP"
+    },
+    "manufacturer": "STMicroelectronics",
+    "physical_features": []
+  }
+}

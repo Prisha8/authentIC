@@ -1,0 +1,248 @@
+[
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "running",
+    "message": "Analyzing IC image with Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "completed",
+    "message": "Identified: STM32F107RCT7 (STMicroelectronics)",
+    "data": {
+      "part_number": "STM32F107RCT7",
+      "manufacturer": "STMicroelectronics",
+      "package_type": "LQFP-64 (Low-profile Quad Flat Package)",
+      "pin_count": 64,
+      "date_codes": [
+        {
+          "raw": "912",
+          "decoded": "Year 2019, Week 12",
+          "format": "YWW (1-digit Year, 2-digit Week)",
+          "location": "Bottom line, right side, after country code and 'GQ'"
+        }
+      ],
+      "lot_codes": [
+        {
+          "raw": "G0243",
+          "meaning": "Manufacturing batch/traceability code",
+          "location": "Third line, left side"
+        },
+        {
+          "raw": "93",
+          "meaning": "Internal traceability code, sub-lot, or revision identifier",
+          "location": "Third line, right side, after G0243"
+        }
+      ],
+      "country_codes": [
+        "CHN"
+      ],
+      "temperature_grade": "T (Industrial temperature range: -40°C to +105°C)",
+      "speed_grade": null,
+      "package_variant": "RC (LQFP64 package, 256 KBytes Flash memory)",
+      "additional_markings": [
+        {
+          "text": "ARM 7",
+          "type": "Processor Core Architecture",
+          "location": "Top line",
+          "decoded": "Indicates ARM Cortex-M3 core (part of ARMv7-M architecture family)"
+        },
+        {
+          "text": "GQ",
+          "type": "Internal manufacturing code",
+          "location": "Bottom line, after 'CHN'",
+          "decoded": null
+        },
+        {
+          "text": "e3",
+          "type": "Environmental compliance mark",
+          "location": "Bottom right, near ST logo",
+          "decoded": "RoHS compliant, Pb-free package"
+        },
+        {
+          "text": "1A",
+          "type": "Internal revision/line code",
+          "location": "Bottom right, after e3",
+          "decoded": null
+        },
+        {
+          "text": "Black Dot",
+          "type": "Pin 1 indicator",
+          "location": "Top right corner of the package",
+          "decoded": null
+        },
+        {
+          "text": "Black Dot",
+          "type": "Reference mark",
+          "location": "Bottom left corner of the package",
+          "decoded": null
+        }
+      ],
+      "condition_notes": "The IC appears to be in excellent physical condition. All markings are clearly visible and legible, with no signs of wear, damage, corrosion, or re-marking. The pins are straight and clean.",
+      "datasheet_search": {
+        "primary_query": "STM32F107RCT7 datasheet STMicroelectronics",
+        "alternative_queries": [
+          "STM32F107RCT6 datasheet STMicroelectronics",
+          "STM32F107 connectivity line datasheet"
+        ],
+        "expected_url_pattern": "https://www.st.com/resource/en/datasheet/stm32f107rc.pdf"
+      },
+      "confidence": {
+        "part_number": "high",
+        "manufacturer": "high",
+        "overall": "high"
+      },
+      "reasoning": "The part number 'STM32F107RCT7' and manufacturer logo (ST) are clearly visible. The package is identified as an LQFP-64 based on its square shape and a careful count of 16 pins per side, totaling 64 pins. 'CHN' explicitly states the country of origin. The 'T' in 'RCT7' indicates an industrial temperature grade (-40°C to +105°C), and 'RC' specifies the package (64-pin) and flash memory size (256KB). The 'ARM 7' marking denotes the processor core architecture (Cortex-M3). The date code '912' is interpreted as Year 2019, Week 12, which is consistent with the product's typical lifecycle. 'G0243' and 'GQ' are identified as lot/internal manufacturing codes. The 'e3' symbol indicates environmental compliance (RoHS compliant, Pb-free), and '1A' is an internal production identifier. The physical condition is excellent with all markings clearly etched."
+    }
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "running",
+    "message": "Searching for STM32F107RCT7 datasheet..."
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "completed",
+    "message": "Datasheet retrieved successfully",
+    "data": {
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/STM32F107RCT7_tavily.pdf",
+      "source": "scraped"
+    }
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "running",
+    "message": "Parsing datasheet and extracting mechanical diagrams..."
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "completed",
+    "message": "Mechanical specifications extracted",
+    "data": {
+      "mechanical_diagram": "data/api_results/diagrams/STM32F107RCT7_tavily_mechanical_LQFP-64 (Low-profile Quad Flat Package)_page88.png",
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/STM32F107RCT7_tavily.pdf",
+      "parsed_specs": {
+        "package_dimensions": {
+          "length_mm": 10.0,
+          "width_mm": 10.0,
+          "height_mm": 1.6,
+          "pin_count": 64,
+          "pin_pitch_mm": 0.5,
+          "package_type": "LQFP"
+        },
+        "manufacturer": "STMicroelectronics",
+        "physical_features": []
+      }
+    }
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "running",
+    "message": "Measuring IC body dimensions..."
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "completed",
+    "message": "Dimensions: AR = 1.00",
+    "visualization": "http://localhost:5001/api/download?file=dimension_analysis_319b5947-e737-4545-b0b2-17b5fa4cfabd_0_A-D-64QFP-09-20F.png",
+    "data": {
+      "measured_aspect_ratio": 1.003,
+      "expected_aspect_ratio": 1.0,
+      "confidence_score": 99.6,
+      "bboxes": [
+        {
+          "type": "ic_body",
+          "x": 579,
+          "y": 226,
+          "w": 1487,
+          "h": 1491,
+          "rw": 1491,
+          "rh": 1487,
+          "angle": 0,
+          "box_pts": [
+            [
+              579,
+              226
+            ],
+            [
+              2066,
+              226
+            ],
+            [
+              2066,
+              1717
+            ],
+            [
+              579,
+              1717
+            ]
+          ],
+          "label": "IC Body: 1491×1487 px (AR: 1.003)"
+        }
+      ],
+      "body_width_px": 1487,
+      "body_height_px": 1491,
+      "verdict": "MATCH",
+      "dimension_source": "gemini_extraction",
+      "expected_length_mm": 10.0,
+      "expected_width_mm": 10.0
+    }
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "running",
+    "message": "Comparing IC with datasheet using Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "completed",
+    "message": "Analysis complete: 3 anomalies detected",
+    "data": {
+      "anomalies_count": 3
+    }
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "running",
+    "message": "Computing authenticity score..."
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "completed",
+    "message": "Verdict: LIKELY COUNTERFEIT (Score: 37.0/100)",
+    "data": {
+      "verdict": "LIKELY COUNTERFEIT",
+      "score": 37.0
+    }
+  },
+  {
+    "type": "step",
+    "step": "report",
+    "title": "Generating Report",
+    "status": "running",
+    "message": "Creating PDF report..."
+  }
+]

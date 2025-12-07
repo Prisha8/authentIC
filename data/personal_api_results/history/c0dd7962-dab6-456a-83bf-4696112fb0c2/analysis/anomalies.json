@@ -1,0 +1,14 @@
+[
+  {
+    "type": "dimensions",
+    "severity": "low",
+    "description": "The CV dimension analysis reported a measured aspect ratio of 1.14 against an expected ratio of 1.00, leading to a 'SUSPICIOUS' verdict with a dimension match score of 78.8/100. This is likely due to the angled photographic perspective of the IC, which distorts the perceived aspect ratio in a 2D bounding box measurement. The datasheet confirms a square 10.0 x 10.0 mm body (AR 1.0). Therefore, this is not considered a manufacturing anomaly but a measurement artifact from the image.",
+    "bbox": [
+      0.3,
+      0.28,
+      0.77,
+      0.88
+    ],
+    "confidence": 0.8
+  }
+]

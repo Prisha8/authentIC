@@ -1,0 +1,20 @@
+{
+  "step": "parse",
+  "timestamp": "2025-12-08T02:00:16.778394",
+  "data": {
+    "mechanical_diagram": "diagrams/ATMEGA32U4_tavily_mechanical_TQFP_page18.png",
+    "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/datasheets/ATMEGA32U4_tavily.pdf",
+    "parsed_specs": {
+      "package_dimensions": {
+        "length_mm": 10.0,
+        "width_mm": 10.0,
+        "height_mm": 1.2,
+        "pin_count": 44,
+        "pin_pitch_mm": 0.8,
+        "package_type": "TQFP"
+      },
+      "manufacturer": "Atmel",
+      "physical_features": []
+    }
+  }
+}

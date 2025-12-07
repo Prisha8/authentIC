@@ -1,0 +1,38 @@
+[
+  {
+    "type": "marking",
+    "severity": "high",
+    "description": "The IC is marked 'ARM7'. However, the datasheet (page 1, 9) clearly states that the STM32F107xx series uses an 'ARM® 32-bit Cortex®-M3 CPU'. The ARM7TDMI is an older and different ARM core architecture. Marking a Cortex-M3 device as 'ARM7' is technically inaccurate and highly misleading, raising significant concerns about the authenticity or specifications of the installed die. This deviation from the specified core type is a strong indicator of potential misrepresentation.",
+    "bbox": [
+      0.35,
+      0.23,
+      0.67,
+      0.3
+    ],
+    "confidence": 0.95
+  },
+  {
+    "type": "marking",
+    "severity": "high",
+    "description": "The pin-1 indicator dot on the physical IC is located in the top-right corner of the package relative to the orientation of the printed text. In contrast, the datasheet's marking example for LQFP64 (Figure 48, page 90) consistently shows the pin-1 indicator dot in the top-left corner relative to the text orientation. This is a fundamental discrepancy in standard package marking conventions and factory practices, strongly suggesting a non-genuine part or a part manufactured outside ST's standard quality control.",
+    "bbox": [
+      0.77,
+      0.17,
+      0.81,
+      0.2
+    ],
+    "confidence": 0.98
+  },
+  {
+    "type": "marking",
+    "severity": "low",
+    "description": "The presence of two distinct date/lot code sequences ('G0243 93' and 'CHN G0 912') on separate lines deviates from the single 'Y WW' format shown in the datasheet's marking example (Figure 48). While not a definitive anomaly, it is an unusual variation in the marking layout that could indicate non-standard manufacturing or tracing practices.",
+    "bbox": [
+      0.35,
+      0.44,
+      0.67,
+      0.54
+    ],
+    "confidence": 0.7
+  }
+]

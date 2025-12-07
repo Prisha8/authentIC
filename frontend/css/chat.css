@@ -396,20 +396,28 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
 
 .chain-step-preview {
   margin-top: 8px;
-  padding: 4px 12px;
+  padding: 6px 14px;
   font-size: 0.8rem;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  align-self: flex-start;
 }
 
 .chain-step-preview:hover {
-  background: var(--bg);
+  background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-foreground, #fff);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.chain-step-preview:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 @keyframes chainStepDrop {

@@ -5,9 +5,153 @@ console.log('===========================================');
 console.log('[API Integration] Script loaded!');
 console.log('===========================================');
 
+// Helper function to build download URL with user_type
+function buildDownloadUrl(filePath) {
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
+  return `http://localhost:5001/api/download?file=${encodeURIComponent(filePath)}&user_type=${userType}`;
+}
+
 // Override the handleSend function with API integration
 (function() {
   console.log('[API Integration] Starting initialization...');
+  
+  /**
+   * Format summary text as a table instead of emoji/heading format
+   */
+  function formatSummaryAsTable(text, apiResult) {
+    if (!text) return text;
+    
+    // Extract key information from text and apiResult
+    const tableRows = [];
+    
+    // Extract IC Identification
+    const partMatch = text.match(/\*\*([^*]+)\*\*.*?from \*\*([^*]+)\*\*/);
+    if (partMatch || apiResult.part_number) {
+      tableRows.push({
+        label: 'IC Identification',
+        value: apiResult.part_number ? `${apiResult.part_number} (${apiResult.manufacturer || 'Unknown'})` : (partMatch ? `${partMatch[1]} (${partMatch[2]})` : 'Unknown')
+      });
+    }
+    
+    // Extract Package Info
+    if (apiResult.package_type || apiResult.pin_count) {
+      const packageInfo = [];
+      if (apiResult.package_type) packageInfo.push(apiResult.package_type);
+      if (apiResult.pin_count) packageInfo.push(`${apiResult.pin_count} pins`);
+      if (packageInfo.length > 0) {
+        tableRows.push({
+          label: 'Package',
+          value: packageInfo.join(', ')
+        });
+      }
+    }
+    
+    // Extract Dimension Analysis
+    const dimMatch = text.match(/📐.*?Dimension Analysis[:\*]*\s*(.+?)(?=\n\n|👁️|⚠️|✅|📄|$)/s);
+    if (dimMatch) {
+      const dimText = dimMatch[1].replace(/\*\*/g, '').trim();
+      if (dimText) {
+        tableRows.push({
+          label: 'Dimension Analysis',
+          value: dimText
+        });
+      }
+    }
+    
+    // Extract Visual Analysis
+    const visualMatch = text.match(/👁️.*?Visual Analysis[:\*]*\s*(.+?)(?=\n\n|⚠️|✅|📄|$)/s);
+    if (visualMatch) {
+      const visualText = visualMatch[1].replace(/\*\*/g, '').trim();
+      if (visualText) {
+        tableRows.push({
+          label: 'Visual Analysis',
+          value: visualText
+        });
+      }
+    }
+    
+    // Extract Anomalies
+    const anomalyMatch = text.match(/⚠️.*?detected.*?(\d+).*?anomal/i);
+    if (anomalyMatch || (apiResult.anomalies && apiResult.anomalies.length > 0)) {
+      const count = anomalyMatch ? parseInt(anomalyMatch[1]) : (apiResult.anomalies ? apiResult.anomalies.length : 0);
+      if (count > 0) {
+        tableRows.push({
+          label: 'Anomalies Detected',
+          value: `${count} anomaly${count !== 1 ? 'ies' : 'y'}`
+        });
+      }
+    } else if (text.includes('No Anomalies') || text.includes('✅')) {
+      tableRows.push({
+        label: 'Anomalies Detected',
+        value: 'None'
+      });
+    }
+    
+    // Extract Final Verdict
+    const verdictMatch = text.match(/(✅|❌|⚠️|❓).*?Final Verdict[:\*]*\s*([^\n]+)/);
+    if (verdictMatch || apiResult.verdict) {
+      const verdict = apiResult.verdict || verdictMatch[2].replace(/\*\*/g, '').trim();
+      tableRows.push({
+        label: 'Verdict',
+        value: verdict
+      });
+    }
+    
+    // Extract Authenticity Score
+    const scoreMatch = text.match(/Authenticity Score[:\*]*\s*([0-9.]+)\/100/);
+    if (scoreMatch || apiResult.authenticity_score !== undefined) {
+      const score = apiResult.authenticity_score !== undefined ? apiResult.authenticity_score.toFixed(1) : scoreMatch[1];
+      tableRows.push({
+        label: 'Authenticity Score',
+        value: `${score}/100`
+      });
+    }
+    
+    // Build HTML table
+    if (tableRows.length > 0) {
+      let tableHTML = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:0.95em;">';
+      tableRows.forEach(row => {
+        tableHTML += `
+          <tr style="border-bottom:1px solid var(--border, #e5e7eb);">
+            <td style="padding:10px 12px;font-weight:600;color:var(--text-primary, #111827);width:35%;vertical-align:top;">${row.label}</td>
+            <td style="padding:10px 12px;color:var(--text-secondary, #6b7280);vertical-align:top;">${row.value}</td>
+          </tr>
+        `;
+      });
+      tableHTML += '</table>';
+      
+      // Preserve all LLM synthesized content - format it nicely
+      // Remove emojis but keep all text content
+      let summaryText = text
+        .replace(/📐|👁️|⚠️|✅|❌|❓|📄/g, '') // Remove emojis
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') // Convert markdown bold
+        .split('\n\n')
+        .filter(p => {
+          const para = p.trim();
+          // Skip empty, download lines, and table headers
+          return para.length > 0 && 
+                 !para.includes('Download Report') && 
+                 !para.includes('Download Full Report') &&
+                 !para.match(/^(IC Identification|Package|Dimension Analysis|Visual Analysis|Anomalies Detected|Verdict|Authenticity Score)[:]/i);
+        })
+        .map(para => {
+          const trimmed = para.trim();
+          if (trimmed.length < 10) return '';
+          return `<p style="margin-top:8px;line-height:1.6;color:var(--text-secondary, #6b7280);">${trimmed}</p>`;
+        })
+        .filter(html => html.length > 0)
+        .join('');
+      
+      // Combine table and summary text
+      if (summaryText) {
+        return tableHTML + '<div style="margin-top:20px;border-top:1px solid var(--border, #e5e7eb);padding-top:16px;">' + summaryText + '</div>';
+      }
+      return tableHTML;
+    }
+    
+    // Fallback: return original text if parsing fails
+    return text;
+  }
   
   // Wait for DOM and chat.js to load - with delay to ensure chat.js initializes first
   function initAPIIntegration() {
@@ -374,15 +518,20 @@ console.log('===========================================');
           
           chatHistory.push(...regularMessages);
           
+          // Get user type
+          const userType = localStorage.getItem('authentIC_userType') || 'business';
+          
           const response = await fetch('http://localhost:5001/api/chat', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              'X-User-Type': userType
             },
             body: JSON.stringify({
               message: text,
               session_id: sessionId,
-              chat_history: chatHistory
+              chat_history: chatHistory,
+              user_type: userType
             })
           });
           
@@ -1243,6 +1392,15 @@ console.log('===========================================');
     function showStepPreview(stepKey, step, stepTitle) {
       // Use output or data field - define this first!
       const stepOutput = step.output || step.data || {};
+      // Get sessionId from step if available, or try to find from active chat
+      let sessionId = step._sessionId || null;
+      if (!sessionId && typeof window !== 'undefined' && window.activeChat) {
+        // Try to get from active chat's messages
+        const processChainMsg = window.activeChat.messages?.find(m => m._processChain && m._sessionId);
+        if (processChainMsg) {
+          sessionId = processChainMsg._sessionId;
+        }
+      }
       
       // Create modal overlay
       const overlay = document.createElement('div');
@@ -1357,7 +1515,7 @@ console.log('===========================================');
           outputDiv.appendChild(markingsDiv);
         }
         
-        // Handle dimension step - show brief summary, visualization shown separately
+        // Handle dimension step - show brief summary and visualization
         if (stepKey === 'dimension' && stepOutput && Object.keys(stepOutput).length > 0) {
           const summaryDiv = document.createElement('div');
           summaryDiv.style.marginTop = '12px';
@@ -1374,6 +1532,48 @@ console.log('===========================================');
             }
           }
           outputDiv.appendChild(summaryDiv);
+          
+          // Show visualization if available in step.visualization
+          if (step.visualization) {
+            const vizDiv = document.createElement('div');
+            vizDiv.style.marginTop = '12px';
+            vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Dimension Visualization:</strong>';
+            const img = document.createElement('img');
+            let imgUrl;
+            const vizPath = step.visualization;
+            if (vizPath.startsWith('http')) {
+              imgUrl = vizPath;
+            } else {
+              // Clean path - remove api_results prefix if present
+              const cleanPath = vizPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+              imgUrl = buildDownloadUrl(cleanPath);
+            }
+            img.src = imgUrl;
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.borderRadius = '6px';
+            img.style.marginTop = '8px';
+            img.style.border = '1px solid var(--border)';
+            img.onerror = function() {
+              console.error('[API Integration] Failed to load dimension visualization:', vizPath, 'tried URL:', imgUrl);
+              // Try alternative path formats
+              const filename = vizPath.split(/[\/\\]/).pop();
+                const altUrl = buildDownloadUrl(filename);
+              console.log('[API Integration] Trying alternative dimension viz path:', altUrl);
+              this.src = altUrl;
+              this.onerror = () => {
+                this.style.display = 'none';
+                const errorMsg = document.createElement('div');
+                errorMsg.style.color = 'var(--muted, #6b7280)';
+                errorMsg.style.padding = '8px';
+                errorMsg.style.fontSize = '0.9em';
+                errorMsg.textContent = 'Dimension visualization not available';
+                vizDiv.appendChild(errorMsg);
+              };
+            };
+            vizDiv.appendChild(img);
+            outputDiv.appendChild(vizDiv);
+          }
         }
         
         // Handle parse step - show diagram image, dimensions table, and PDF download
@@ -1385,26 +1585,74 @@ console.log('===========================================');
           contentContainer.style.marginTop = '12px';
           contentContainer.style.flexWrap = 'wrap';
           
-          // Left side: Mechanical Diagram
+          // Left side: Mechanical Diagram (Outline Dimension Visual)
           if (stepOutput.mechanical_diagram) {
             const diagramDiv = document.createElement('div');
             diagramDiv.style.flex = '1';
             diagramDiv.style.minWidth = '300px';
-            diagramDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Extracted Mechanical Diagram:</strong>';
+            diagramDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Extracted Outline Dimension Diagram:</strong>';
             const img = document.createElement('img');
-            // Convert relative path to absolute URL if needed
+            // Convert path to use /api/download endpoint
             const diagramPath = stepOutput.mechanical_diagram;
-            // Use /api/download endpoint for all images
-            const cleanPath = diagramPath.replace(/^.*api_results[\/\\]/, '');
-            img.src = diagramPath.startsWith('http') ? diagramPath : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
+            let imgUrl;
+            if (diagramPath.startsWith('http')) {
+              imgUrl = diagramPath;
+            } else {
+              // Extract relative path from api_results
+              let cleanPath = diagramPath;
+              // Handle absolute paths
+              if (diagramPath.includes('api_results')) {
+                cleanPath = diagramPath.split('api_results')[1].replace(/^[\/\\]/, '');
+              } else if (diagramPath.includes('diagrams')) {
+                // Extract filename if full path
+                const filename = diagramPath.split(/[\/\\]/).pop();
+                cleanPath = `diagrams/${filename}`;
+              } else {
+                // Try to extract from path
+                const parts = diagramPath.split(/[\/\\]/);
+                const filename = parts.pop();
+                // Check if it's a diagram file
+                if (filename.includes('mechanical') || filename.includes('diagram')) {
+                  cleanPath = `diagrams/${filename}`;
+                } else {
+                  cleanPath = filename;
+                }
+              }
+              imgUrl = buildDownloadUrl(cleanPath);
+            }
+            img.src = imgUrl;
             img.style.maxWidth = '100%';
             img.style.height = 'auto';
             img.style.borderRadius = '6px';
             img.style.marginTop = '8px';
             img.style.border = '1px solid var(--border)';
             img.onerror = function() {
-              console.error('[API Integration] Failed to load diagram image:', diagramPath);
-              this.style.display = 'none';
+              console.error('[API Integration] Failed to load diagram image:', diagramPath, 'tried URL:', imgUrl);
+              // Try alternative - extract filename and try with diagrams/ prefix
+              if (!diagramPath.startsWith('http')) {
+                const filename = diagramPath.split(/[\/\\]/).pop().split('?')[0];
+                const altUrl = buildDownloadUrl(`diagrams/${filename}`);
+                console.log('[API Integration] Trying alternative diagram path:', altUrl);
+                this.src = altUrl;
+                this.onerror = () => {
+                  // Try just filename
+                  const filenameOnly = buildDownloadUrl(filename);
+                  console.log('[API Integration] Trying filename only:', filenameOnly);
+                  this.src = filenameOnly;
+                  this.onerror = () => {
+                    console.error('[API Integration] All diagram image load attempts failed');
+                    this.style.display = 'none';
+                    const errorMsg = document.createElement('div');
+                    errorMsg.style.color = 'var(--muted, #6b7280)';
+                    errorMsg.style.padding = '8px';
+                    errorMsg.style.fontSize = '0.9em';
+                    errorMsg.textContent = 'Diagram image not available';
+                    diagramDiv.appendChild(errorMsg);
+                  };
+                };
+              } else {
+                this.style.display = 'none';
+              }
             };
             diagramDiv.appendChild(img);
             contentContainer.appendChild(diagramDiv);
@@ -1485,19 +1733,40 @@ console.log('===========================================');
             downloadBtn.style.width = '100%';
             downloadBtn.textContent = '📄 Download Datasheet PDF';
             downloadBtn.onclick = () => {
-              // Convert relative path to absolute URL
+              // Convert path to use /api/download endpoint
               const pdfPath = stepOutput.datasheet_path;
-              // Try different path formats
               let pdfUrl;
+              let cleanPath = '';
               if (pdfPath.startsWith('http')) {
                 pdfUrl = pdfPath;
-              } else if (pdfPath.startsWith('/')) {
-                pdfUrl = `http://localhost:5001${pdfPath}`;
               } else {
-                // Try api_results path
-                const cleanPath = pdfPath.replace(/^.*\/([^\/]+\.pdf)$/, '$1');
-                pdfUrl = `http://localhost:5001/api_results/datasheets/${encodeURIComponent(cleanPath)}`;
+                // Extract relative path from api_results
+                cleanPath = pdfPath;
+                // Handle absolute paths - extract relative to api_results
+                // First, normalize the path separators
+                const normalizedPath = pdfPath.replace(/\\/g, '/');
+                
+                if (normalizedPath.includes('api_results')) {
+                  // Extract everything after api_results
+                  const parts = normalizedPath.split('api_results');
+                  cleanPath = parts[parts.length - 1].replace(/^\/+/, '');
+                } else if (normalizedPath.includes('datasheets')) {
+                  // Extract relative path from datasheets folder
+                  const datasheetIndex = normalizedPath.indexOf('datasheets');
+                  cleanPath = normalizedPath.substring(datasheetIndex);
+                } else {
+                  // Try to find datasheets in path or use filename
+                  const filename = normalizedPath.split('/').pop();
+                  if (normalizedPath.toLowerCase().includes('datasheet') || normalizedPath.toLowerCase().endsWith('.pdf')) {
+                    cleanPath = `datasheets/${filename}`;
+                  } else {
+                    cleanPath = filename;
+                  }
+                }
+                pdfUrl = buildDownloadUrl(cleanPath);
               }
+              console.log('[API Integration] Downloading datasheet from:', pdfUrl, '(original path:', pdfPath, ', clean path:', cleanPath, ')');
+              // Open in new window - browser will handle download
               window.open(pdfUrl, '_blank');
             };
             pdfDiv.appendChild(downloadBtn);
@@ -1560,7 +1829,8 @@ console.log('===========================================');
         body.appendChild(outputDiv);
       }
       
-      if (step.visualization) {
+      // Show visualization if available (but skip for dimension step - already shown above)
+      if (step.visualization && stepKey !== 'dimension') {
         const vizDiv = document.createElement('div');
         vizDiv.className = 'step-preview-section';
         vizDiv.innerHTML = `<strong>Visualization:</strong>`;
@@ -1579,7 +1849,7 @@ console.log('===========================================');
         } else {
           // Clean path - remove api_results prefix if present
           const cleanPath = vizPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
-          imgSrc = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}`;
+          imgSrc = buildDownloadUrl(cleanPath);
         }
         
         img.src = imgSrc;
@@ -1590,11 +1860,18 @@ console.log('===========================================');
         img.style.border = '1px solid var(--border)';
         img.onerror = function() {
           console.error('[API Integration] Failed to load visualization:', imgSrc, 'Original path:', vizPath);
-          this.style.display = 'none';
-          const errorMsg = document.createElement('p');
-          errorMsg.textContent = 'Image could not be loaded';
-          errorMsg.style.color = 'var(--error)';
-          vizDiv.appendChild(errorMsg);
+          // Try alternative - extract just the filename
+          const filename = vizPath.split(/[\/\\]/).pop().split('?')[0];
+                const altUrl = buildDownloadUrl(filename);
+          console.log('[API Integration] Trying alternative viz path:', altUrl);
+          this.src = altUrl;
+          this.onerror = () => {
+            this.style.display = 'none';
+            const errorMsg = document.createElement('p');
+            errorMsg.textContent = 'Image could not be loaded';
+            errorMsg.style.color = 'var(--error)';
+            vizDiv.appendChild(errorMsg);
+          };
         };
         vizDiv.appendChild(img);
         body.appendChild(vizDiv);
@@ -1714,6 +1991,9 @@ console.log('===========================================');
                 .replace(/\n{3,}/g, '\n\n')  // Replace 3+ newlines with 2
                 .replace(/^\n+|\n+$/g, '')  // Remove leading/trailing newlines
                 .trim();
+              
+              // Format summary as table instead of emoji/heading format
+              summaryText = formatSummaryAsTable(summaryText, apiResult);
               
               // Create single consolidated message with both summary and download button
               const finalMsg = {

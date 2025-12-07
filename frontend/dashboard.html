@@ -8,6 +8,43 @@
   <!-- Using system fonts for offline support -->
   <link rel="stylesheet" href="css/dashboard.css">
   <link rel="stylesheet" href="css/chat.css">
+  <script>
+    // Define logout handler IMMEDIATELY so inline onclick can use it
+    window.handleLogout = async function(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+      console.log('[Dashboard] Logout clicked via inline handler');
+      try {
+        // Clear localStorage FIRST to prevent auto-login
+        localStorage.removeItem('authentIC_loggedIn');
+        localStorage.removeItem('authentIC_userType');
+        localStorage.removeItem('authentIC_companyId');
+        localStorage.removeItem('authentIC_userId');
+        localStorage.removeItem('authentIC_email');
+        localStorage.removeItem('authentIC_sessionId');
+        localStorage.removeItem('authentIC_pendingOAuth');
+        
+        if (typeof supabase !== 'undefined' && supabase && supabase.auth) {
+          try {
+            await supabase.auth.signOut();
+            // Wait for session to clear
+            await new Promise(resolve => setTimeout(resolve, 200));
+          } catch (err) {
+            console.warn('Supabase sign out error:', err);
+          }
+        }
+        
+        window.location.href = 'login.html';
+      } catch (error) {
+        console.error('Logout error:', error);
+        localStorage.clear();
+        window.location.href = 'login.html';
+      }
+    };
+  </script>
 </head>
 <body>
   <div class="app-shell">
@@ -68,15 +105,30 @@
           </button>
 
           <!-- bell (notification icon) -->
-          <button class="icon-btn" aria-label="Notifications" title="Notifications">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-            </svg>
-          </button>
+          <div class="notification-container" style="position: relative;">
+            <button class="icon-btn" id="notificationBtn" aria-label="Notifications" title="Notifications">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+            </button>
+            <div class="notification-dropdown" id="notificationDropdown" style="display: none;">
+              <div class="notification-dropdown-header">
+                <h3>Notifications</h3>
+                <button class="notification-clear-btn" id="notificationClearBtn" onclick="window.notificationService.clearAll()" style="display: none;">Clear All</button>
+              </div>
+              <div class="notification-list" id="notificationList">
+                <!-- Notifications will be populated here -->
+              </div>
+              <div class="notification-empty" id="notificationEmpty" style="display: block;">
+                <p>No notifications</p>
+              </div>
+            </div>
+          </div>
 
           <button class="profile-btn" title="Profile" id="profileBtn">PS</button>
-          <button class="icon-btn" id="logoutBtn" title="Logout" style="margin-left:10px">
+          <button class="icon-btn" id="logoutBtn" title="Logout" style="margin-left:10px" onclick="if(typeof window.handleLogout === 'function') { window.handleLogout(); } else { console.error('handleLogout not available'); }">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
               <polyline points="16 17 21 12 16 7"></polyline>
@@ -89,6 +141,7 @@
 
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
+      <div class="sidebar-resizer" id="sidebarResizer"></div>
       <div class="sidebar-top">
         <nav class="menu" aria-label="Main menu">
           <button id="analyseIcsBtn" class="menu-item" type="button" style="cursor: pointer; border: none; width: 100%; text-align: left;" onclick="if(typeof window.switchView === 'function') { window.switchView('analyse'); return false; }">
@@ -103,38 +156,50 @@
             <span data-i18n="nav.dashboard">Dashboard</span>
           </button>
 
-          <button class="menu-item" id="searchChatsBtn" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;">
+          <button class="menu-item" id="searchChatsBtn" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;" onclick="if(typeof window.openRAGSearch === 'function') { window.openRAGSearch(); } else { console.error('openRAGSearch not available'); }">
             <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5A6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 20.5L21.5 19l-6-5z" fill="currentColor"/></svg>
             <span data-i18n="nav.searchChats">Search Chats</span>
           </button>
-
-          <a class="menu-item" href="#">
-            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M4 6h16v12H4z M6 8v8h12V8z" fill="currentColor"/></svg>
-            <span data-i18n="nav.library">Library</span>
-          </a>
         </nav>
       </div>
 
       <div class="chats">
         <div class="chats-header">
           <h4 data-i18n="nav.processedHistory">Processed History</h4>
-          <div class="history-filters" id="historyFilters" style="display: none;">
-            <select id="filterDate" class="filter-select">
-              <option value="all">All Dates</option>
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="custom">Custom Range</option>
-            </select>
-            <select id="filterICType" class="filter-select">
-              <option value="all">All IC Types</option>
-              <option value="DIP">DIP</option>
-              <option value="SOIC">SOIC</option>
-              <option value="QFP">QFP</option>
-              <option value="QFN">QFN</option>
-              <option value="BGA">BGA</option>
-            </select>
-            <button id="clearFilters" class="filter-clear-btn" style="display: none;">Clear</button>
+          <!-- Search Bar -->
+          <div class="history-search-container" id="historySearchContainer">
+            <input 
+              type="text" 
+              id="historySearchInput" 
+              class="history-search-input" 
+              placeholder="Search by part number, manufacturer, verdict..."
+              autocomplete="off"
+            >
+            <svg class="history-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"></path>
+            </svg>
+          </div>
+          <!-- Sort and Filter Controls -->
+          <div class="history-controls" id="historyControls">
+            <div class="history-sort-container">
+              <select id="historySortBy" class="history-sort-select" title="Sort by">
+                <option value="date-desc">Date (Newest First)</option>
+                <option value="date-asc">Date (Oldest First)</option>
+                <option value="score-desc">Score (High to Low)</option>
+                <option value="score-asc">Score (Low to High)</option>
+                <option value="part-number">Part Number (A-Z)</option>
+                <option value="manufacturer">Manufacturer (A-Z)</option>
+              </select>
+            </div>
+            <div class="history-filter-container">
+              <select id="filterVerdict" class="history-filter-select" title="Filter by verdict">
+                <option value="all">All Verdicts</option>
+                <option value="AUTHENTIC">Authentic</option>
+                <option value="SUSPICIOUS">Suspicious</option>
+                <option value="COUNTERFEIT">Counterfeit</option>
+              </select>
+            </div>
           </div>
         </div>
         <div id="processedHistoryList" class="processed-history-list">
@@ -151,7 +216,7 @@
     </aside>
 
 
-    <!-- SEARCH OVERLAY MODAL -->
+    <!-- SEARCH OVERLAY MODAL (for personal users - kept for backward compatibility) -->
     <div id="searchOverlay" class="search-overlay" style="display: none;">
       <div class="search-modal">
         <div class="search-modal-header">
@@ -201,7 +266,7 @@
             </div>
             
             <div class="tasks-section">
-              <h4 data-i18n="dashboard.upcomingTasks">Upcoming tasks</h4>
+              <h4 data-i18n="dashboard.upcomingTasks">Upcoming verifications</h4>
               <ul class="events" id="upcomingTasksList">
                 <li class="empty-task">
                   <div class="muted">No upcoming tasks</div>
@@ -222,7 +287,7 @@
               <div class="kpi-item">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
-                  <path class="circle" id="kpi-visual" stroke-dasharray="0,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-visual" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text" id="kpi-visual-text">0%</text>
                 </svg>
                 <div class="kpi-label">Visual Match</div>
@@ -231,7 +296,7 @@
               <div class="kpi-item">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
-                  <path class="circle" id="kpi-metadata" stroke-dasharray="0,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-metadata" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text" id="kpi-metadata-text">0%</text>
                 </svg>
                 <div class="kpi-label">Avg Score</div>
@@ -240,7 +305,7 @@
               <div class="kpi-item">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
-                  <path class="circle" id="kpi-confidence" stroke-dasharray="0,100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-confidence" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
                   <text x="18" y="20.35" class="chart-text" id="kpi-confidence-text">0%</text>
                 </svg>
                 <div class="kpi-label">Confidence</div>
@@ -360,55 +425,42 @@
           </div>
         </div>
 
-        <!-- BOTTOM: Share Analysis Card (Horizontal) -->
+        <!-- BOTTOM: Share Processed Batches Card (Horizontal) -->
         <div class="card share-analysis fullwidth">
-          <h4 data-i18n="dashboard.shareAnalysis">Share Analysis</h4>
+          <h4 data-i18n="dashboard.shareProcessedBatches">Share Processed Batches</h4>
           <div class="share-suggestions" id="shareSuggestions">
-            <div class="share-item">
-              <div class="share-avatar">AS</div>
-              <div class="share-info">
-                <div class="share-name">Aarav Sharma</div>
-                <div class="share-role">Quality Manager • aarav.sharma@ti.com</div>
-              </div>
-              <button class="share-btn" data-email="aarav.sharma@ti.com" onclick="shareAnalysis(this)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                  <polyline points="16 6 12 2 8 6"></polyline>
-                  <line x1="12" y1="2" x2="12" y2="15"></line>
-                </svg>
-                Share
-              </button>
-            </div>
-
-            <div class="share-item">
-              <div class="share-avatar">RP</div>
-              <div class="share-info">
-                <div class="share-name">Riya Patel</div>
-                <div class="share-role">Supplier Liaison • riya.patel@microchip.com</div>
-              </div>
-              <button class="share-btn" data-email="riya.patel@microchip.com" onclick="shareAnalysis(this)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-                  <polyline points="16 6 12 2 8 6"></polyline>
-                  <line x1="12" y1="2" x2="12" y2="15"></line>
-                </svg>
-                Share
-              </button>
-            </div>
-
-            <div class="share-item">
+            <!-- Contacts will be dynamically loaded here -->
+            <div class="share-item add-recipient-item" onclick="openAddRecipientModal()">
               <div class="share-avatar">+</div>
               <div class="share-info">
                 <div class="share-name">Add Recipient</div>
-                <div class="share-role">Share with custom email</div>
+                <div class="share-role">Add a new contact to share with</div>
               </div>
-              <button class="share-btn add-recipient" onclick="openAddRecipientModal()">
+              <button class="share-btn add-recipient" onclick="event.stopPropagation(); openAddRecipientModal()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
                 Add
               </button>
+            </div>
+          </div>
+          
+          <!-- Share Lots Section -->
+          <div class="share-lots-section" id="shareLotsSection" style="display: none;">
+            <div class="share-lots-header">
+              <h5>Select Processing History Lots to Share</h5>
+              <button class="share-btn" onclick="shareSelectedAnalysis()" id="shareSelectedBtn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                  <polyline points="16 6 12 2 8 6"></polyline>
+                  <line x1="12" y1="2" x2="12" y2="15"></line>
+                </svg>
+                Send Analysis
+              </button>
+            </div>
+            <div class="share-lots-list" id="shareLotsList">
+              <!-- Lots will be dynamically loaded here -->
             </div>
           </div>
         </div>
@@ -437,10 +489,181 @@
     </div>
   </div>
 
+  <!-- Suspicious IC Review Modal -->
+  <div id="suspiciousICModal" class="suspicious-ic-modal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="suspicious-modal-content">
+      <div class="suspicious-modal-header">
+        <h2 class="suspicious-modal-title">IC Review</h2>
+        <button class="suspicious-modal-close" onclick="if(typeof window.closeSuspiciousICModal === 'function') { window.closeSuspiciousICModal(); }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="suspicious-modal-body">
+        <div class="suspicious-modal-date"></div>
+        <div class="suspicious-modal-main">
+          <div class="suspicious-modal-image">
+            <img src="" alt="IC Image" />
+          </div>
+          <div class="suspicious-modal-pdf">
+            <iframe src="" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
+            <div class="suspicious-modal-pdf-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted);">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3; margin-bottom: 16px;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+              <p>No OEM datasheet available</p>
+            </div>
+          </div>
+        </div>
+        <div class="suspicious-modal-actions">
+          <button class="suspicious-modal-verdict-btn verdict-counterfeit" onclick="if(typeof window.handleManualVerdict === 'function') { const sessionId = this.dataset.sessionId; if(sessionId) window.handleManualVerdict(sessionId, 'COUNTERFEIT'); }">
+            Mark as Counterfeit
+          </button>
+          <button class="suspicious-modal-verdict-btn verdict-authentic" onclick="if(typeof window.handleManualVerdict === 'function') { const sessionId = this.dataset.sessionId; if(sessionId) window.handleManualVerdict(sessionId, 'AUTHENTIC'); }">
+            Mark as Authentic
+          </button>
+        </div>
+        <div class="suspicious-modal-note">
+          <small>This action will mark the IC as manually reviewed</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Recipient Modal -->
+  <div id="addRecipientModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2>Add Recipient</h2>
+        <button class="modal-close" onclick="closeAddRecipientModal()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="addRecipientForm" onsubmit="event.preventDefault(); addRecipient();">
+          <div class="form-group">
+            <label for="recipientName">Name *</label>
+            <input type="text" id="recipientName" class="form-input" required placeholder="Enter full name">
+          </div>
+          <div class="form-group">
+            <label for="recipientPosition">Position</label>
+            <input type="text" id="recipientPosition" class="form-input" placeholder="e.g., Quality Manager">
+          </div>
+          <div class="form-group">
+            <label for="recipientEmail">Email *</label>
+            <input type="email" id="recipientEmail" class="form-input" required placeholder="Enter email address">
+          </div>
+          <div class="form-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+            <button type="button" class="btn-secondary" onclick="closeAddRecipientModal()">Cancel</button>
+            <button type="submit" class="btn-primary">Add Recipient</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAG Search Overlay (Enhanced Search Chats) -->
+  <div id="ragSearchOverlay" class="rag-search-overlay" style="display: none;">
+    <div class="rag-search-modal">
+      <div class="rag-search-header-bar">
+        <h3>Search Across Processed Lots</h3>
+        <button class="rag-search-close" onclick="if(typeof window.closeRAGSearch === 'function') { window.closeRAGSearch(); }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="rag-search-container">
+        <!-- Left Panel: Lot Selection -->
+        <div class="rag-search-left">
+          <div class="rag-lot-search-container">
+            <input 
+              type="text" 
+              id="ragLotSearch" 
+              class="rag-lot-search-input" 
+              placeholder="Search lots..."
+            >
+          </div>
+          <div id="ragLotSelection" class="rag-lot-selection">
+            <div class="rag-lot-header">
+              <h4>Select Knowledge Groups</h4>
+              <p class="rag-lot-subtitle">You can select multiple knowledge groups for cross-search</p>
+            </div>
+            <div class="rag-empty">Loading lots...</div>
+            <div class="rag-lot-footer">
+              <div class="rag-usage-tips">
+                <h5>Usage Tips</h5>
+                <ul>
+                  <li>Multiple knowledge groups can be selected</li>
+                  <li>Get comprehensive answers with cross-search</li>
+                  <li>Specific questions improve accuracy</li>
+                  <li>Check references on the right side</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Center Panel: Query and Answer -->
+        <div class="rag-search-center">
+          <div id="ragSearchPanel" class="rag-search-panel">
+            <div class="rag-search-header">
+              <h4>Ask Questions</h4>
+              <p class="rag-search-subtitle">Select knowledge groups to start searching</p>
+            </div>
+            <div class="rag-search-input-container">
+              <input 
+                type="text" 
+                id="ragQueryInput" 
+                class="rag-query-input" 
+                placeholder="Select knowledge groups first..."
+                disabled
+              >
+              <button 
+                class="rag-search-btn" 
+                id="ragSearchBtn"
+                disabled
+                title="Send"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Right Panel: Reference Chunks -->
+        <div class="rag-search-right">
+          <div id="ragReferences" class="rag-references">
+            <div class="rag-references-header">
+              <h4>Reference Chunks</h4>
+              <p class="rag-references-subtitle">Document sections that served as the basis for the response</p>
+            </div>
+            <div class="rag-empty">No references yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Supabase Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Supabase Config -->
   <script src="js/supabase-config.js"></script>
+  <!-- Notification Service -->
+  <script src="js/notification-service.js"></script>
   <!-- switchView is defined in dashboard-query.js which loads below -->
   <!-- Chat Service (Supabase operations) -->
   <script src="js/chat-service.js"></script>
@@ -452,11 +675,76 @@
   <script src="js/dark-mode.js"></script>
   <!-- API Client -->
   <script src="js/api-client.js"></script>
+  <!-- History Detail Modal -->
+  <!-- Load simple version first to ensure function is available -->
+  <script src="js/history-detail-simple.js"></script>
+  <script src="js/history-detail.js"></script>
+  <!-- RAG Search - Load once, check if already loaded -->
+  <script>
+    (function() {
+      // Check if already loaded
+      if (typeof window.initRAGSearch === 'function') {
+        console.log('[Dashboard] ✓ RAG search already loaded');
+        return;
+      }
+      
+      // Check if script tag already exists
+      const existingScript = document.querySelector('script[src*="rag-search.js"]');
+      if (existingScript) {
+        console.log('[Dashboard] RAG search script tag already exists, waiting for load...');
+        existingScript.addEventListener('load', function() {
+          if (typeof window.initRAGSearch === 'function') {
+            console.log('[Dashboard] ✓ initRAGSearch available after existing script loaded');
+          }
+        });
+        return;
+      }
+      
+      // Load the script
+      const script = document.createElement('script');
+      script.src = 'js/rag-search.js';
+      script.async = false;
+      script.defer = false;
+      script.onload = function() {
+        console.log('[Dashboard] RAG search script loaded');
+        if (typeof window.initRAGSearch === 'function') {
+          console.log('[Dashboard] ✓ initRAGSearch is available');
+        } else {
+          console.error('[Dashboard] ✗ initRAGSearch NOT available after script load');
+        }
+      };
+      script.onerror = function() {
+        console.error('[Dashboard] ✗ Failed to load rag-search.js');
+      };
+      document.head.appendChild(script);
+    })();
+  </script>
   <!-- Dashboard Query Functionality -->
   <!-- Load dashboard-query.js FIRST to define switchView early -->
   <script src="js/dashboard-query.js"></script>
   <script src="js/dashboard.js"></script>
-  <script src="js/api-client.js"></script>
+  <script>
+    // Verify RAG search functions are loaded
+    (function() {
+      // Check immediately
+      if (typeof window.initRAGSearch === 'function' || window.ragSearchReady) {
+        console.log('[Dashboard] ✓ RAG search functions loaded successfully');
+      } else {
+        // Listen for ready event
+        document.addEventListener('ragSearchReady', function() {
+          console.log('[Dashboard] ✓ RAG search ready event received');
+        });
+        // Also check after a short delay
+        setTimeout(function() {
+          if (typeof window.initRAGSearch === 'function') {
+            console.log('[Dashboard] ✓ RAG search functions loaded (delayed check)');
+          } else {
+            console.warn('[Dashboard] ⚠ RAG search functions may not be loaded');
+          }
+        }, 500);
+      }
+    })();
+  </script>
   <script>
     // Handle OAuth callback from Google
     (async () => {
@@ -521,6 +809,105 @@
         }
       }
     })();
+
+    // RAG Search functions (for business users)
+    window.openRAGSearch = function() {
+      const userType = localStorage.getItem('authentIC_userType');
+      
+      if (userType === 'business') {
+        const overlay = document.getElementById('ragSearchOverlay');
+        if (overlay) {
+          overlay.style.display = 'flex';
+          
+          // Function to initialize RAG search with retry logic and auto-reload
+          const doInit = (retries = 30) => {
+            if (typeof window.initRAGSearch === 'function') {
+              console.log('[Dashboard] ✓ Calling initRAGSearch...');
+              try {
+                window.initRAGSearch();
+              } catch (error) {
+                console.error('[Dashboard] Error calling initRAGSearch:', error);
+                const searchPanel = document.getElementById('ragSearchPanel');
+                if (searchPanel) {
+                  searchPanel.innerHTML = '<div class="rag-empty">Error: ' + error.message + '</div>';
+                }
+              }
+            } else if (retries > 0) {
+              if (retries % 5 === 0 || retries < 5) {
+                console.log(`[Dashboard] initRAGSearch not available, retrying... (${retries} left)`);
+              }
+              setTimeout(() => doInit(retries - 1), 100);
+            } else {
+              console.error('[Dashboard] ❌ initRAGSearch not available after retries');
+              console.error('[Dashboard] ragSearchReady:', window.ragSearchReady);
+              console.error('[Dashboard] RAG-related keys:', Object.keys(window).filter(k => k.toLowerCase().includes('rag')));
+              console.error('[Dashboard] RAG_SEARCH_LOADED:', window.RAG_SEARCH_LOADED);
+              
+              // Don't reload - check if script loaded but export failed
+              // Check for JavaScript errors in console
+              showError();
+              
+              function showError() {
+                const lotPanel = document.getElementById('ragLotSelection');
+                const searchPanel = document.getElementById('ragSearchPanel');
+                if (lotPanel) {
+                  lotPanel.innerHTML = '<div class="rag-empty">Error: RAG search script not loaded.<br>Please refresh the page.</div>';
+                }
+                if (searchPanel) {
+                  searchPanel.innerHTML = '<div class="rag-empty">Error: RAG search script not loaded.</div>';
+                }
+              }
+            }
+          };
+          
+          // Start initialization
+          doInit();
+        }
+      } else {
+        // Personal users - use old search overlay
+        const overlay = document.getElementById('searchOverlay');
+        if (overlay) {
+          overlay.style.display = 'flex';
+        }
+      }
+    };
+
+    window.closeRAGSearch = function() {
+      const overlay = document.getElementById('ragSearchOverlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+        // Reset state when closing
+        if (typeof window.ragSearchState !== 'undefined' && window.ragSearchState.reset) {
+          window.ragSearchState.reset();
+        }
+      }
+    };
+
+    // Close RAG search on overlay click and Escape key
+    document.addEventListener('DOMContentLoaded', () => {
+      const ragOverlay = document.getElementById('ragSearchOverlay');
+      if (ragOverlay) {
+        ragOverlay.addEventListener('click', (e) => {
+          if (e.target === ragOverlay) {
+            if (typeof window.closeRAGSearch === 'function') {
+              window.closeRAGSearch();
+            }
+          }
+        });
+      }
+      
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const overlay = document.getElementById('ragSearchOverlay');
+          if (overlay && overlay.style.display === 'flex') {
+            if (typeof window.closeRAGSearch === 'function') {
+              window.closeRAGSearch();
+            }
+          }
+        }
+      });
+    });
   </script>
 </body>
 </html>

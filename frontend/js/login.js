@@ -11,9 +11,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (typeof supabase !== 'undefined') {
     // Check existing Supabase session
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
+    
+    // Also check localStorage - if localStorage is cleared but session exists, 
+    // it means user logged out, so clear the stale session
+    const isLoggedIn = localStorage.getItem('authentIC_loggedIn');
+    const userType = localStorage.getItem('authentIC_userType');
+    
+    if (session && isLoggedIn === 'true' && userType) {
+      // Both session and localStorage indicate logged in - redirect
       window.location.href = getRedirectUrl();
       return;
+    } else if (session && (!isLoggedIn || !userType)) {
+      // Session exists but localStorage is cleared - user logged out, clear stale session
+      console.log('[Login] Stale Supabase session detected, clearing...');
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('[Login] Error clearing stale session:', err);
+      }
+      // Don't redirect - let user log in fresh
+    } else if (!session && isLoggedIn === 'true') {
+      // localStorage says logged in but no session - clear localStorage
+      console.log('[Login] Stale localStorage detected, clearing...');
+      localStorage.removeItem('authentIC_loggedIn');
+      localStorage.removeItem('authentIC_userType');
+      localStorage.removeItem('authentIC_companyId');
+      localStorage.removeItem('authentIC_userId');
+      localStorage.removeItem('authentIC_email');
+      localStorage.removeItem('authentIC_sessionId');
+      localStorage.removeItem('authentIC_pendingOAuth');
+      // Don't redirect - let user log in fresh
     }
   } else {
     // Fallback to localStorage check for backward compatibility

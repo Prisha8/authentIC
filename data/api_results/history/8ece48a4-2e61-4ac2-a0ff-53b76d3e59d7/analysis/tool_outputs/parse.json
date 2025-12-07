@@ -1,0 +1,20 @@
+{
+  "step": "parse",
+  "timestamp": "2025-12-07T21:33:13.657573",
+  "data": {
+    "mechanical_diagram": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/diagrams/ATMEGA32U4-AU_tavily_mechanical_TQFP (Thin Quad Flat Package)_page18.png",
+    "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/datasheets/ATMEGA32U4-AU_tavily.pdf",
+    "parsed_specs": {
+      "package_dimensions": {
+        "length_mm": 10.0,
+        "width_mm": 10.0,
+        "height_mm": 1.2,
+        "pin_count": 44,
+        "pin_pitch_mm": 0.8,
+        "package_type": "TQFP"
+      },
+      "manufacturer": "Atmel (now Microchip Technology)",
+      "physical_features": []
+    }
+  }
+}

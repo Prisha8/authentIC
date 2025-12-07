@@ -644,18 +644,13 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
                 expected_width    # Can be None - estimator handles this
             )
             
-            # Generate visualization
+            # Generate visualization - save directly to output directory to avoid duplication
             from tools.dimension_estimator import visualize_dimensions
             # Ensure image_path is a Path object for .stem attribute
             image_path_obj = Path(image_path) if not isinstance(image_path, Path) else image_path
             viz_path = str(self.output_dir / f"dimension_analysis_{image_path_obj.stem}.png")
-            visualize_dimensions(str(image_path), dim_result)
-            
-            # Move the generated visualization
-            import shutil
-            default_viz = str(image_path).replace('.png', '_dimension_analysis.png')
-            if Path(default_viz).exists():
-                shutil.move(default_viz, viz_path)
+            # Pass output_path directly to avoid creating duplicate files
+            visualize_dimensions(str(image_path), dim_result, output_path=viz_path)
             
             # Convert DimensionResult to dict
             body_bbox = [b for b in dim_result.bboxes if b['type'] == 'ic_body'][0] if dim_result.bboxes else {}
@@ -985,7 +980,7 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
         if final_score >= 75:
             result.verdict = "LIKELY AUTHENTIC"
         elif final_score >= 50:
-            result.verdict = "SUSPICIOUS - REQUIRES INSPECTION"
+            result.verdict = "SUSPICIOUS"
         else:
             result.verdict = "LIKELY COUNTERFEIT"
         

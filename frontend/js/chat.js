@@ -2,24 +2,41 @@
 // Check if user is logged in using Supabase
 
 // Setup logout handler immediately (before auth check)
+// Only set up if dashboard.js hasn't already done it
 function setupLogout() {
+  // Check if handler already attached by dashboard.js
+  if (window.logoutHandlerAttached) {
+    console.log('[Chat] Logout handler already attached by dashboard.js, skipping');
+    return;
+  }
+  
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
-    // Remove any existing listeners to avoid duplicates
-    const newLogoutBtn = logoutBtn.cloneNode(true);
-    logoutBtn.parentNode.replaceChild(newLogoutBtn, logoutBtn);
+    // Only attach if not already attached
+    if (logoutBtn.dataset.handlerAttached === 'true') {
+      console.log('[Chat] Logout handler already attached, skipping');
+      return;
+    }
     
-    newLogoutBtn.addEventListener('click', async () => {
+    logoutBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       try {
         console.log('[Chat] Logout clicked');
         // Sign out from Supabase if available
-        if (typeof supabase !== 'undefined') {
-          await supabase.auth.signOut();
+        if (typeof supabase !== 'undefined' && supabase && supabase.auth) {
+          try {
+            await supabase.auth.signOut();
+          } catch (err) {
+            console.warn('[Chat] Supabase sign out error:', err);
+          }
         }
         // Clear localStorage
         localStorage.removeItem('authentIC_loggedIn');
         localStorage.removeItem('authentIC_userType');
         localStorage.removeItem('authentIC_companyId');
+        localStorage.removeItem('authentIC_userId');
+        localStorage.removeItem('authentIC_email');
         localStorage.removeItem('authentIC_pendingOAuth');
         // Redirect to login
         window.location.href = 'login.html';
@@ -29,7 +46,10 @@ function setupLogout() {
         localStorage.clear();
         window.location.href = 'login.html';
       }
-    });
+    }, true); // Use capture phase
+    
+    logoutBtn.dataset.handlerAttached = 'true';
+    window.logoutHandlerAttached = true;
     console.log('[Chat] Logout handler attached');
   } else {
     console.warn('[Chat] Logout button not found');
@@ -444,22 +464,28 @@ document.addEventListener('DOMContentLoaded', () => {
       }
         if(m.text){
       const p = document.createElement('div');
-          // Clean up excessive blank lines first
-          let cleanedText = m.text
-            .replace(/\n{3,}/g, '\n\n')  // Replace 3+ newlines with 2
-            .replace(/^\n+|\n+$/g, ''); // Remove leading/trailing newlines
-          
-          // Simple markdown-style formatting
-          let formattedText = cleanedText
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
-            .replace(/^• (.+)$/gm, '<div style="padding-left:1em">• $1</div>') // Bullet points
-            .replace(/^(\d+)\. (.+)$/gm, '<div style="padding-left:1em">$1. $2</div>') // Numbered lists
-            .replace(/^✓ (.+)$/gm, '<div style="color:#10b981;padding-left:1em">✓ $1</div>') // Green checkmarks
-            .replace(/^⚠ (.+)$/gm, '<div style="color:#f59e0b;padding-left:1em">⚠ $1</div>'); // Orange warnings
-          
-          p.innerHTML = formattedText;
-          p.style.whiteSpace = 'pre-line';
-          p.style.lineHeight = '1.6';
+          // Check if text is already HTML (from formatSummaryAsTable)
+          if (m.text.includes('<table') || m.text.includes('<div style=')) {
+            // Already formatted as HTML table
+            p.innerHTML = m.text;
+          } else {
+            // Clean up excessive blank lines first
+            let cleanedText = m.text
+              .replace(/\n{3,}/g, '\n\n')  // Replace 3+ newlines with 2
+              .replace(/^\n+|\n+$/g, ''); // Remove leading/trailing newlines
+            
+            // Simple markdown-style formatting
+            let formattedText = cleanedText
+              .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+              .replace(/^• (.+)$/gm, '<div style="padding-left:1em">• $1</div>') // Bullet points
+              .replace(/^(\d+)\. (.+)$/gm, '<div style="padding-left:1em">$1. $2</div>') // Numbered lists
+              .replace(/^✓ (.+)$/gm, '<div style="color:#10b981;padding-left:1em">✓ $1</div>') // Green checkmarks
+              .replace(/^⚠ (.+)$/gm, '<div style="color:#f59e0b;padding-left:1em">⚠ $1</div>'); // Orange warnings
+            
+            p.innerHTML = formattedText;
+            p.style.whiteSpace = 'pre-line';
+            p.style.lineHeight = '1.6';
+          }
       div.appendChild(p);
         }
         

@@ -1,0 +1,35 @@
+{
+  "session_id": "c0dd7962-dab6-456a-83bf-4696112fb0c2",
+  "processed_date": "2025-12-07T22:22:49.792360",
+  "user_id": null,
+  "machine_id": null,
+  "ic_info": {
+    "part_number": "ATMEGA32U4",
+    "manufacturer": "Atmel",
+    "package_type": "TQFP",
+    "pin_count": 44,
+    "coo": "PH",
+    "date_codes": [],
+    "lot_codes": [],
+    "temperature_grade": null,
+    "speed_grade": null,
+    "package_variant": null
+  },
+  "scores": {
+    "authenticity_score": 82.4,
+    "visual_match": 95,
+    "dimension_score": 78.8,
+    "confidence": 82.4,
+    "text_quality_score": 95
+  },
+  "verdict": "LIKELY AUTHENTIC",
+  "file_paths": {
+    "primary_image": "history/c0dd7962-dab6-456a-83bf-4696112fb0c2/images/primary.png",
+    "thumbnail": "history/c0dd7962-dab6-456a-83bf-4696112fb0c2/images/thumbnail.png",
+    "report_pdf": "history/c0dd7962-dab6-456a-83bf-4696112fb0c2/reports/analysis_report.pdf",
+    "datasheet": "history/c0dd7962-dab6-456a-83bf-4696112fb0c2/datasheets/datasheet.pdf"
+  },
+  "processing_time_seconds": 112.45213007926941,
+  "anomalies_count": 1,
+  "additional_info": ""
+}

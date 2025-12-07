@@ -1,0 +1,35 @@
+{
+  "session_id": "319b5947-e737-4545-b0b2-17b5fa4cfabd",
+  "processed_date": "2025-12-06T14:14:54.369047",
+  "user_id": null,
+  "machine_id": null,
+  "ic_info": {
+    "part_number": "STM32F107RCT7",
+    "manufacturer": "STMicroelectronics",
+    "package_type": "LQFP-64 (Low-profile Quad Flat Package)",
+    "pin_count": 64,
+    "coo": "PH",
+    "date_codes": [],
+    "lot_codes": [],
+    "temperature_grade": null,
+    "speed_grade": null,
+    "package_variant": null
+  },
+  "scores": {
+    "authenticity_score": 37.0,
+    "visual_match": 85,
+    "dimension_score": 99.6,
+    "confidence": 37.0,
+    "text_quality_score": 85
+  },
+  "verdict": "LIKELY COUNTERFEIT",
+  "file_paths": {
+    "primary_image": "history/319b5947-e737-4545-b0b2-17b5fa4cfabd/images/primary.png",
+    "thumbnail": "history/319b5947-e737-4545-b0b2-17b5fa4cfabd/images/thumbnail.png",
+    "report_pdf": "history/319b5947-e737-4545-b0b2-17b5fa4cfabd/reports/analysis_report.pdf",
+    "datasheet": "history/319b5947-e737-4545-b0b2-17b5fa4cfabd/datasheets/datasheet.pdf"
+  },
+  "processing_time_seconds": 140.66016221046448,
+  "anomalies_count": 3,
+  "additional_info": ""
+}

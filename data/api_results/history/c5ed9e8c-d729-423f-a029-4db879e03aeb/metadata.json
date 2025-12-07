@@ -1,0 +1,37 @@
+{
+  "session_id": "c5ed9e8c-d729-423f-a029-4db879e03aeb",
+  "processed_date": "2025-12-06T14:36:14.838733",
+  "user_id": null,
+  "machine_id": null,
+  "ic_info": {
+    "part_number": "ADC0832CCN",
+    "manufacturer": "National Semiconductor",
+    "package_type": "SOIC-8",
+    "pin_count": 8,
+    "coo": "PH",
+    "date_codes": [],
+    "lot_codes": [],
+    "temperature_grade": null,
+    "speed_grade": null,
+    "package_variant": null
+  },
+  "scores": {
+    "authenticity_score": 35.6,
+    "visual_match": 90,
+    "dimension_score": 91.7,
+    "confidence": 35.6,
+    "text_quality_score": 90
+  },
+  "verdict": "COUNTERFEIT",
+  "file_paths": {
+    "primary_image": "history/c5ed9e8c-d729-423f-a029-4db879e03aeb/images/primary.png",
+    "thumbnail": "history/c5ed9e8c-d729-423f-a029-4db879e03aeb/images/thumbnail.png",
+    "report_pdf": "history/c5ed9e8c-d729-423f-a029-4db879e03aeb/reports/analysis_report.pdf",
+    "datasheet": "history/c5ed9e8c-d729-423f-a029-4db879e03aeb/datasheets/datasheet.pdf"
+  },
+  "processing_time_seconds": 117.68883872032166,
+  "anomalies_count": 3,
+  "additional_info": "analyse",
+  "manually_reviewed": true,
+  "manually_reviewed_at": "2025-12-08T02:34:36.903308"
+}

@@ -16,9 +16,14 @@ class ICDetectionAPI {
   async detectIC(imageFile) {
     const formData = new FormData();
     formData.append('image', imageFile);
+    
+    // Get user type and add to form data
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    formData.append('user_type', userType);
+    console.log('[API Client] Sending detection request with user_type:', userType);
 
     try {
-      // Increase timeout to 5 minutes (long detections with Gemini + PDF generation)
+      // Increase timeout to 5 minutes (long detections with VLM + PDF generation)
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 seconds
 

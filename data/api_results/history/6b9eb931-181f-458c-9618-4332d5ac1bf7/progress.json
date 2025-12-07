@@ -1,0 +1,254 @@
+[
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "running",
+    "message": "Analyzing IC image with Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "completed",
+    "message": "Identified: M74HC238B1 (STMicroelectronics)",
+    "data": {
+      "part_number": "M74HC238B1",
+      "manufacturer": "STMicroelectronics",
+      "package_type": "DIP",
+      "pin_count": 16,
+      "date_codes": [
+        {
+          "raw": "9031",
+          "decoded": "While '9031' could be misinterpreted as Year 1990, Week 31 in a standard YYWW format, this is inconsistent with the 'e4' marking indicating post-2005 manufacture. A more plausible interpretation for modern ST parts is YWWX, where 'Y' is the last digit of the year (e.g., 2009 or 2019), 'WW' is the week (e.g., 03), and 'X' ('1') is a sub-batch or internal identifier. Thus, potentially Year 2009 or 2019, Week 03.",
+          "format": "YWWX (Year, Week, Extra - embedded)",
+          "location": "Embedded within the GK9031YD lot code string"
+        }
+      ],
+      "lot_codes": [
+        {
+          "raw": "GK9031YD",
+          "meaning": "Main manufacturing batch/traceability code. This alphanumeric string uniquely identifies the production run, and often embeds date information as analyzed above.",
+          "location": "Below the part number"
+        },
+        {
+          "raw": "VW GK",
+          "meaning": "Secondary internal manufacturing batch, plant, or process code. 'GK' may be a plant or factory identifier, appearing redundantly with the main lot code.",
+          "location": "Below the main lot code"
+        }
+      ],
+      "country_codes": [
+        "CHN"
+      ],
+      "temperature_grade": "Not specified (Commercial/Industrial grade is common for 74HC logic, but no specific 'C' or 'I' marking is present).",
+      "speed_grade": "Not explicitly specified (High-speed CMOS (HC) is the family speed, but no specific speed variant suffix like '-20' is visible).",
+      "package_variant": "B1",
+      "additional_markings": [
+        {
+          "text": "ST Logo",
+          "type": "Manufacturer logo",
+          "location": "Bottom left of the IC surface",
+          "decoded": "STMicroelectronics"
+        },
+        {
+          "text": "e4",
+          "type": "Environmental compliance symbol",
+          "location": "Below the ST Logo, circled",
+          "decoded": "Industry standard marking indicating Lead-free, RoHS compliant, Halogen-free, and classified with a moisture sensitivity level (MSL) of 4. This signifies a manufacturing date post-2005."
+        },
+        {
+          "text": "M",
+          "type": "Part number prefix",
+          "location": "Start of the part number",
+          "decoded": "A common prefix used by STMicroelectronics for their integrated circuits, especially in the 74xx logic family."
+        },
+        {
+          "text": "74HC",
+          "type": "Logic family",
+          "location": "Within the part number",
+          "decoded": "Identifies the IC as part of the High-speed CMOS logic family."
+        },
+        {
+          "text": "238",
+          "type": "Device function code",
+          "location": "Within the part number",
+          "decoded": "Identifies the specific function of the device, which is typically a 3-to-8 line decoder/demultiplexer."
+        },
+        {
+          "text": "GK",
+          "type": "Plant/Assembly code",
+          "location": "Within lot code and on its own line below it",
+          "decoded": "Likely an internal manufacturing plant or assembly site identifier, appearing consistently across lot codes."
+        },
+        {
+          "text": "VW",
+          "type": "Internal process code",
+          "location": "On the line with 'GK'",
+          "decoded": "Likely an internal production line or assembly process identifier specific to the manufacturing facility."
+        }
+      ],
+      "condition_notes": "The IC appears to be in new or very good condition. All surface markings are clear and fully legible, with no visible signs of physical damage, scratching, corrosion, or wear on the package or pins.",
+      "datasheet_search": {
+        "primary_query": "M74HC238B1 datasheet STMicroelectronics",
+        "alternative_queries": [
+          "M74HC238 datasheet STMicroelectronics",
+          "74HC238 datasheet STMicroelectronics"
+        ],
+        "expected_url_pattern": "https://www.st.com/resource/en/datasheet/m74hc238b1.pdf OR https://www.st.com/resource/en/datasheet/74hc238.pdf"
+      },
+      "confidence": {
+        "part_number": "high",
+        "manufacturer": "high",
+        "overall": "high"
+      },
+      "reasoning": "The part number 'M74HC238B1' is clearly and prominently visible. The manufacturer is unequivocally identified by the distinctive 'ST' logo. The package is a standard 16-pin Dual In-line Package (DIP), confirmed by visual inspection and the 'B1' suffix, which is a common package designator for STMicroelectronics DIPs. The country of origin 'CHN' (China) is explicitly marked. Lot codes 'GK9031YD' and 'VW GK' are visible as manufacturing identifiers. The 'e4' symbol is a critical clue, indicating lead-free and RoHS compliance, which places its manufacture post-2005. This directly contradicts a direct 'YYWW' interpretation of '9031' as Year 1990, Week 31. Therefore, an interpretation consistent with modern STMicroelectronics date coding (YWWX format, e.g., Year 2009/2019, Week 03) is provided for the date code, acknowledging its embedded nature within the lot code."
+    }
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "running",
+    "message": "Searching for M74HC238B1 datasheet..."
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "completed",
+    "message": "Datasheet retrieved successfully",
+    "data": {
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/datasheets/M74HC238B1_tavily.pdf",
+      "source": "scraped"
+    }
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "running",
+    "message": "Parsing datasheet and extracting mechanical diagrams..."
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "completed",
+    "message": "Mechanical specifications extracted",
+    "data": {
+      "mechanical_diagram": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/diagrams/M74HC238B1_tavily_mechanical_DIP_page7.png",
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/api_results/datasheets/M74HC238B1_tavily.pdf",
+      "parsed_specs": {
+        "package_dimensions": {
+          "length_mm": 20.0,
+          "width_mm": 7.1,
+          "height_mm": 5.1,
+          "pin_count": 16,
+          "pin_pitch_mm": 2.54,
+          "package_type": "DIP"
+        },
+        "manufacturer": "STMicroelectronics",
+        "physical_features": []
+      }
+    }
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "running",
+    "message": "Measuring IC body dimensions..."
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "completed",
+    "message": "Dimensions: AR = 2.70",
+    "visualization": "http://localhost:5001/api/download?file=dimension_analysis_6b9eb931-181f-458c-9618-4332d5ac1bf7_0_labelled_ic%20copy%20%281%29.png",
+    "data": {
+      "measured_aspect_ratio": 2.698,
+      "expected_aspect_ratio": 2.817,
+      "confidence_score": 93.7,
+      "bboxes": [
+        {
+          "type": "ic_body",
+          "x": 37,
+          "y": 33,
+          "w": 1244,
+          "h": 461,
+          "rw": 1244,
+          "rh": 461,
+          "angle": 0,
+          "box_pts": [
+            [
+              37,
+              33
+            ],
+            [
+              1281,
+              33
+            ],
+            [
+              1281,
+              494
+            ],
+            [
+              37,
+              494
+            ]
+          ],
+          "label": "IC Body: 1244×461 px (AR: 2.698)"
+        }
+      ],
+      "body_width_px": 1244,
+      "body_height_px": 461,
+      "verdict": "MATCH",
+      "dimension_source": "gemini_extraction",
+      "expected_length_mm": 20.0,
+      "expected_width_mm": 7.1
+    }
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "running",
+    "message": "Comparing IC with datasheet using Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "completed",
+    "message": "Analysis complete: 1 anomalies detected",
+    "data": {
+      "anomalies_count": 1
+    }
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "running",
+    "message": "Computing authenticity score..."
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "completed",
+    "message": "Verdict: LIKELY AUTHENTIC (Score: 87.9/100)",
+    "data": {
+      "verdict": "LIKELY AUTHENTIC",
+      "score": 87.9
+    }
+  },
+  {
+    "type": "step",
+    "step": "report",
+    "title": "Generating Report",
+    "status": "running",
+    "message": "Creating PDF report..."
+  }
+]

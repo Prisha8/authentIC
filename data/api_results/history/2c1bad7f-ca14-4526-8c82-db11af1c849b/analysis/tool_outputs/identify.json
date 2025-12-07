@@ -1,0 +1,76 @@
+{
+  "step": "identify",
+  "timestamp": "2025-12-08T02:43:00.887547",
+  "data": {
+    "part_number": "MEGA32U4",
+    "manufacturer": "Atmel",
+    "package_type": "TQFP",
+    "pin_count": 44,
+    "date_codes": [
+      {
+        "raw": "1035",
+        "decoded": "Year 2010, Week 35",
+        "format": "YYWW",
+        "location": "Second line of text on IC top, before 'E KR'"
+      }
+    ],
+    "lot_codes": [
+      {
+        "raw": "0G3455",
+        "meaning": "Manufacturing batch/traceability code, used for tracking the specific production run and materials.",
+        "location": "Third line of text on IC top"
+      }
+    ],
+    "country_codes": [],
+    "temperature_grade": "Industrial",
+    "speed_grade": null,
+    "package_variant": "-AU",
+    "additional_markings": [
+      {
+        "text": "AIMEL",
+        "type": "Manufacturer Logo",
+        "location": "Top left of the IC top surface",
+        "decoded": "Atmel (now part of Microchip Technology)"
+      },
+      {
+        "text": "E",
+        "type": "Internal revision/code",
+        "location": "After '1035' on the second line",
+        "decoded": "Often indicates a silicon revision or an internal manufacturing variant."
+      },
+      {
+        "text": "KR",
+        "type": "Assembly/Fab Site Code",
+        "location": "After '1035E' on the second line",
+        "decoded": "Likely an internal code for the factory or assembly site, possibly referring to a site in Korea."
+      },
+      {
+        "text": "-AU",
+        "type": "Package and Temperature Suffix",
+        "location": "Below 'MEGA32U4'",
+        "decoded": "Indicates TQFP package (U) and Industrial temperature grade (-40°C to +85°C) (A). Typically also implies lead-free/RoHS compliant."
+      },
+      {
+        "text": "Pin 1 Indicator Dot",
+        "type": "Physical marking",
+        "location": "Small circular indentation near the top-left corner of the IC body, above the 'AIMEL' logo.",
+        "decoded": "Indicates the location of pin 1 for proper orientation."
+      }
+    ],
+    "condition_notes": "The IC appears to be in new or unused condition. The pins are clean and well-formed. The markings are clear, crisp, and fully legible without any signs of wear, scratches, or damage.",
+    "datasheet_search": {
+      "primary_query": "ATmega32U4-AU datasheet",
+      "alternative_queries": [
+        "Microchip ATmega32U4-AU datasheet",
+        "Atmel MEGA32U4 datasheet"
+      ],
+      "expected_url_pattern": "https://www.microchip.com/en-us/product/ATmega32U4"
+    },
+    "confidence": {
+      "part_number": "high",
+      "manufacturer": "high",
+      "overall": "high"
+    },
+    "reasoning": "The 'AIMEL' logo clearly identifies the manufacturer as Atmel. 'MEGA32U4' is the core part number. The '-AU' suffix defines the package (TQFP) and industrial temperature grade. The physical appearance with gull-wing leads on all four sides confirms a QFP-style package, and counting pins visually confirms 44 pins (11 pins per side), consistent with a TQFP-44. '1035' is a standard YYWW date code, and '0G3455' is a typical alphanumeric lot code. 'E' and 'KR' are common internal Atmel/Microchip codes for revision and factory location respectively. All markings are clearly visible and unambiguous."
+  }
+}

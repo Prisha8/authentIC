@@ -1,0 +1,42 @@
+{
+  "measured_aspect_ratio": 1.455,
+  "expected_aspect_ratio": 1.539,
+  "confidence_score": 91.7,
+  "bboxes": [
+    {
+      "type": "ic_body",
+      "x": 371,
+      "y": 306,
+      "w": 1760,
+      "h": 1210,
+      "rw": 1760,
+      "rh": 1210,
+      "angle": 0,
+      "box_pts": [
+        [
+          371,
+          306
+        ],
+        [
+          2131,
+          306
+        ],
+        [
+          2131,
+          1516
+        ],
+        [
+          371,
+          1516
+        ]
+      ],
+      "label": "IC Body: 1760×1210 px (AR: 1.455)"
+    }
+  ],
+  "body_width_px": 1760,
+  "body_height_px": 1210,
+  "verdict": "MATCH",
+  "dimension_source": "gemini_extraction",
+  "expected_length_mm": 10.16,
+  "expected_width_mm": 6.6
+}

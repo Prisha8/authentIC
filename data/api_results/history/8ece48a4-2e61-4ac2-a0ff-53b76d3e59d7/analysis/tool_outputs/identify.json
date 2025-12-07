@@ -1,0 +1,72 @@
+{
+  "step": "identify",
+  "timestamp": "2025-12-07T21:33:13.657387",
+  "data": {
+    "part_number": "ATMEGA32U4-AU",
+    "manufacturer": "Atmel (now Microchip Technology)",
+    "package_type": "TQFP (Thin Quad Flat Package)",
+    "pin_count": 44,
+    "date_codes": [
+      {
+        "raw": "1035",
+        "decoded": "Year 2010, Week 35",
+        "format": "YYWW",
+        "location": "Third line of text, first four digits"
+      }
+    ],
+    "lot_codes": [
+      {
+        "raw": "0G3455",
+        "meaning": "Manufacturing batch/traceability code, unique to a specific production run.",
+        "location": "Fourth line of text"
+      }
+    ],
+    "country_codes": [
+      "KR"
+    ],
+    "temperature_grade": "Industrial (A in -AU suffix typically indicates -40°C to +85°C)",
+    "speed_grade": "Not explicitly visible (often implied by the part number, e.g., max clock speed)",
+    "package_variant": "AU (indicates TQFP package, Industrial temperature grade, and Lead-Free/RoHS compliant)",
+    "additional_markings": [
+      {
+        "text": "AIMEL",
+        "type": "Manufacturer logo",
+        "location": "Top left of the IC surface",
+        "decoded": "Atmel Corporation"
+      },
+      {
+        "text": "E",
+        "type": "Internal factory/process code",
+        "location": "Third line, after the date code '1035'",
+        "decoded": "Often indicates manufacturing site, process revision, or internal tracking."
+      },
+      {
+        "text": "KR",
+        "type": "Country of origin code",
+        "location": "Third line, after '1035E'",
+        "decoded": "Republic of Korea (South Korea)"
+      },
+      {
+        "text": "Dot marking",
+        "type": "Pin 1 indicator",
+        "location": "Top left corner of the IC package (near the 'AIMEL' logo)",
+        "decoded": "Indicates the location of pin 1 for proper orientation."
+      }
+    ],
+    "condition_notes": "The IC appears to be in excellent physical condition. No visible scratches, cracks, bent pins, or signs of excessive heat/wear. Pins are shiny and appear un-used or very carefully handled.",
+    "datasheet_search": {
+      "primary_query": "ATMEGA32U4-AU datasheet",
+      "alternative_queries": [
+        "ATMEGA32U4 TQFP datasheet",
+        "Microchip ATMEGA32U4 datasheet"
+      ],
+      "expected_url_pattern": "https://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-42296-ATmega32U4-ATmega16U4_Datasheet.pdf"
+    },
+    "confidence": {
+      "part_number": "high",
+      "manufacturer": "high",
+      "overall": "high"
+    },
+    "reasoning": "The 'AIMEL' logo clearly identifies the manufacturer as Atmel. 'MEGA32U4' is the core part number. The '-AU' suffix is a standard Atmel/Microchip designation for a TQFP package, industrial temperature range, and lead-free compliance. The package is clearly a square, surface-mount type with gull-wing leads on all four sides, characteristic of a TQFP. Counting the pins reveals 11 pins per side, totaling 44 pins. '1035' fits the YYWW date code format (Year 2010, Week 35). 'KR' is a common country code for South Korea. '0G3455' is consistent with a manufacturing lot code. All markings are clear and unambiguous."
+  }
+}

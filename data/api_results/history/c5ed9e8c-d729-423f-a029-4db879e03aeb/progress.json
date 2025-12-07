@@ -1,0 +1,235 @@
+[
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "running",
+    "message": "Analyzing IC image with Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "completed",
+    "message": "Identified: ADC0832CCN (National Semiconductor)",
+    "data": {
+      "part_number": "ADC0832CCN",
+      "manufacturer": "National Semiconductor",
+      "package_type": "SOIC-8",
+      "pin_count": 8,
+      "date_codes": [
+        {
+          "raw": "98",
+          "decoded": "Year 1998",
+          "format": "YY (embedded in lot code)",
+          "location": "First two digits of the top line after manufacturer logo"
+        }
+      ],
+      "lot_codes": [
+        {
+          "raw": "98ZDF3G3",
+          "meaning": "Manufacturing batch/traceability code. The '98' likely indicates the year of manufacture (1998).",
+          "location": "Top line, after manufacturer logo"
+        }
+      ],
+      "country_codes": [],
+      "temperature_grade": "Commercial",
+      "speed_grade": null,
+      "package_variant": "N",
+      "additional_markings": [
+        {
+          "text": "N (stylized)",
+          "type": "Manufacturer Logo",
+          "location": "Top left of the IC",
+          "decoded": "National Semiconductor"
+        },
+        {
+          "text": "ADC",
+          "type": "Function/Family Identifier",
+          "location": "Second line, above part number",
+          "decoded": "Analog-to-Digital Converter"
+        },
+        {
+          "text": "N",
+          "type": "Package/Lead Finish/Variant Suffix",
+          "location": "End of part number (ADC0832CCN)",
+          "decoded": "For National Semi, 'N' often denoted specific lead finish or packaging for SOIC, or sometimes PDIP. In ADC0832CCN, the 'CN' usually indicates SOIC Commercial, with 'N' specifically for lead finish/packaging."
+        },
+        {
+          "text": "C",
+          "type": "Temperature Grade Suffix",
+          "location": "Within part number (ADC0832CCN)",
+          "decoded": "Commercial Temperature Range (0°C to +70°C)"
+        },
+        {
+          "text": "notch",
+          "type": "Pin 1 indicator",
+          "location": "Left side of the package",
+          "decoded": "Indicates the orientation of the IC, Pin 1 is typically to the upper left when viewed from the top, aligned with the notch."
+        }
+      ],
+      "condition_notes": "The IC appears to be in good physical condition with clear and legible markings. The pins are intact.",
+      "datasheet_search": {
+        "primary_query": "ADC0832CCN datasheet National Semiconductor",
+        "alternative_queries": [
+          "ADC0832 datasheet National Semiconductor",
+          "National Semiconductor ADC0832CCN SOIC-8 datasheet"
+        ],
+        "expected_url_pattern": "https://www.ti.com/lit/ds/..."
+      },
+      "confidence": {
+        "part_number": "high",
+        "manufacturer": "high",
+        "overall": "high"
+      },
+      "reasoning": "The manufacturer logo (stylized 'N') is clearly identifiable as National Semiconductor. The part number 'ADC0832CCN' is distinct and a very common 8-bit ADC. The package is a standard 8-pin SOIC with a clear pin 1 notch. The 'C' in the part number indicates commercial temperature grade. The '98' at the beginning of the top line (after the logo) is a strong indicator of the year of manufacture (1998), with the remaining alphanumeric string being the lot code. National Semiconductor was acquired by Texas Instruments, so official datasheets are typically found on TI's website."
+    }
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "running",
+    "message": "Searching for ADC0832CCN datasheet..."
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "completed",
+    "message": "Datasheet retrieved successfully",
+    "data": {
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/ADC0832CCN_tavily.pdf",
+      "source": "scraped"
+    }
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "running",
+    "message": "Parsing datasheet and extracting mechanical diagrams..."
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "completed",
+    "message": "Mechanical specifications extracted",
+    "data": {
+      "mechanical_diagram": "data/api_results/diagrams/ADC0832CCN_tavily_mechanical_SOIC-8_page37.png",
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/ADC0832CCN_tavily.pdf",
+      "parsed_specs": {
+        "package_dimensions": {
+          "length_mm": 10.16,
+          "width_mm": 6.6,
+          "height_mm": 8.26,
+          "pin_count": 8,
+          "pin_pitch_mm": 2.54,
+          "package_type": "PDIP"
+        },
+        "manufacturer": "National Semiconductor",
+        "physical_features": []
+      }
+    }
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "running",
+    "message": "Measuring IC body dimensions..."
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "completed",
+    "message": "Dimensions: AR = 1.46",
+    "visualization": "http://localhost:5001/api/download?file=dimension_analysis_c5ed9e8c-d729-423f-a029-4db879e03aeb_0_A-D-08DIP-12-17F.png",
+    "data": {
+      "measured_aspect_ratio": 1.455,
+      "expected_aspect_ratio": 1.539,
+      "confidence_score": 91.7,
+      "bboxes": [
+        {
+          "type": "ic_body",
+          "x": 371,
+          "y": 306,
+          "w": 1760,
+          "h": 1210,
+          "rw": 1760,
+          "rh": 1210,
+          "angle": 0,
+          "box_pts": [
+            [
+              371,
+              306
+            ],
+            [
+              2131,
+              306
+            ],
+            [
+              2131,
+              1516
+            ],
+            [
+              371,
+              1516
+            ]
+          ],
+          "label": "IC Body: 1760×1210 px (AR: 1.455)"
+        }
+      ],
+      "body_width_px": 1760,
+      "body_height_px": 1210,
+      "verdict": "MATCH",
+      "dimension_source": "gemini_extraction",
+      "expected_length_mm": 10.16,
+      "expected_width_mm": 6.6
+    }
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "running",
+    "message": "Comparing IC with datasheet using Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "completed",
+    "message": "Analysis complete: 3 anomalies detected",
+    "data": {
+      "anomalies_count": 3
+    }
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "running",
+    "message": "Computing authenticity score..."
+  },
+  {
+    "type": "step",
+    "step": "verdict",
+    "title": "Calculating Verdict",
+    "status": "completed",
+    "message": "Verdict: LIKELY COUNTERFEIT (Score: 35.6/100)",
+    "data": {
+      "verdict": "LIKELY COUNTERFEIT",
+      "score": 35.6
+    }
+  },
+  {
+    "type": "step",
+    "step": "report",
+    "title": "Generating Report",
+    "status": "running",
+    "message": "Creating PDF report..."
+  }
+]

@@ -121,7 +121,7 @@
     
     .image-previews-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap: 12px;
       margin-top: 12px;
       width: 100%;
@@ -134,6 +134,8 @@
       overflow: hidden;
       border: 1px solid var(--border);
       background: var(--bg);
+      min-height: 300px;
+      max-height: 500px;
     }
     
     .image-preview-item img {
@@ -449,6 +451,7 @@
   </div>
 
   <script src="js/api-client.js"></script>
+  <script src="js/notification-service.js"></script>
   <script src="js/analyse-ics.js"></script>
 </body>
 </html>

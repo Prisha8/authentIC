@@ -1,0 +1,25 @@
+# Flask and web server dependencies
+flask>=2.3.0
+flask-cors>=4.0.0
+werkzeug>=2.3.0
+
+# Database dependencies
+# Note: pgvector is a PostgreSQL extension, not a Python package
+# Install it in PostgreSQL: CREATE EXTENSION vector;
+psycopg2-binary>=2.9.0
+
+# Machine Learning and Embeddings
+sentence-transformers>=2.2.0
+numpy>=1.24.0
+torch>=2.0.0
+
+# Image processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# PDF processing
+PyPDF2>=3.0.0
+
+# Other utilities
+python-dotenv>=1.0.0
+

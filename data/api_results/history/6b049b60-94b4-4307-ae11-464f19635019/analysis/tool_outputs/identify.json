@@ -1,0 +1,61 @@
+{
+  "step": "identify",
+  "timestamp": "2025-12-08T02:00:16.778214",
+  "data": {
+    "part_number": "ATMEGA32U4",
+    "manufacturer": "Atmel",
+    "package_type": "TQFP",
+    "pin_count": 48,
+    "date_codes": [
+      {
+        "raw": "1035",
+        "decoded": "Year 2010, Week 35",
+        "format": "YYWW",
+        "location": "Third line of text on the IC package, first four digits"
+      }
+    ],
+    "lot_codes": [
+      {
+        "raw": "OG3455",
+        "meaning": "Manufacturing batch/traceability code",
+        "location": "Fourth line of text on the IC package"
+      }
+    ],
+    "country_codes": [
+      "KR"
+    ],
+    "temperature_grade": "Industrial",
+    "speed_grade": "Not explicitly visible (implied by part number, typically up to 16MHz)",
+    "package_variant": "-AU",
+    "additional_markings": [
+      {
+        "text": "E",
+        "type": "Internal revision/manufacturing code",
+        "location": "Third line of text, between date code '1035' and country code 'KR'",
+        "decoded": "Specific meaning (e.g., revision, mask set) typically requires manufacturer-specific decode guides."
+      },
+      {
+        "text": "Pin 1 indicator",
+        "type": "Physical marking",
+        "location": "Small circular dimple in the top-left corner of the IC package body",
+        "decoded": "Indicates the location of pin 1 on the package."
+      }
+    ],
+    "condition_notes": "The IC appears to be in excellent physical condition. The package body is clean with no visible scratches, cracks, or signs of heat damage. The leads are straight, clean, and show no signs of corrosion or previous soldering, suggesting it is a new or unused component. All markings are clear and legible.",
+    "datasheet_search": {
+      "primary_query": "ATMEGA32U4 datasheet",
+      "alternative_queries": [
+        "ATMEGA32U4-AU datasheet",
+        "Atmel ATMEGA32U4 datasheet",
+        "Microchip ATMEGA32U4 datasheet"
+      ],
+      "expected_url_pattern": "https://www.microchip.com/wwwproducts/en/ATmega32U4 OR https://ww1.microchip.com/downloads/en/DeviceDoc/*.pdf"
+    },
+    "confidence": {
+      "part_number": "high",
+      "manufacturer": "high",
+      "overall": "high"
+    },
+    "reasoning": "The manufacturer logo 'AIMEL' is clearly visible, identifying it as Atmel. The main part number 'MEGA32U4' is prominently displayed. The package is a Thin Quad Flat Package (TQFP) with 48 pins, determined by careful counting of the leads on all four sides. The '-AU' suffix is a standard Atmel ordering code, where 'A' typically denotes Industrial temperature range and 'U' indicates TQFP package with Pb-free finish. The '1035' is a standard YYWW date code (Year 2010, Week 35). 'OG3455' is a common format for a manufacturing lot/batch code. 'KR' is a commonly used country code (South Korea). The 'E' is likely an internal manufacturing or revision code. The physical condition is excellent, and all markings are crisp and unambiguous."
+  }
+}

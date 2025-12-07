@@ -1,0 +1,46 @@
+{
+  "step": "dimension",
+  "timestamp": "2025-12-06T14:17:15.103478",
+  "data": {
+    "measured_aspect_ratio": 1.003,
+    "expected_aspect_ratio": 1.0,
+    "confidence_score": 99.6,
+    "bboxes": [
+      {
+        "type": "ic_body",
+        "x": 579,
+        "y": 226,
+        "w": 1487,
+        "h": 1491,
+        "rw": 1491,
+        "rh": 1487,
+        "angle": 0,
+        "box_pts": [
+          [
+            579,
+            226
+          ],
+          [
+            2066,
+            226
+          ],
+          [
+            2066,
+            1717
+          ],
+          [
+            579,
+            1717
+          ]
+        ],
+        "label": "IC Body: 1491×1487 px (AR: 1.003)"
+      }
+    ],
+    "body_width_px": 1487,
+    "body_height_px": 1491,
+    "verdict": "MATCH",
+    "dimension_source": "gemini_extraction",
+    "expected_length_mm": 10.0,
+    "expected_width_mm": 10.0
+  }
+}

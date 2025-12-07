@@ -1,0 +1,132 @@
+[
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "running",
+    "message": "Analyzing IC image with Gemini..."
+  },
+  {
+    "type": "step",
+    "step": "identify",
+    "title": "Identifying IC",
+    "status": "completed",
+    "message": "Identified: UNKNOWN (UNKNOWN)",
+    "data": {
+      "error": "Rate limit exceeded",
+      "message": "429 You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/usage?tab=rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash\nPlease retry in 51.774762577s. [links {\n  description: \"Learn more about Gemini API quotas\"\n  url: \"https://ai.google.dev/gemini-api/docs/rate-limits\"\n}\n, violations {\n  quota_metric: \"generativelanguage.googleapis.com/generate_content_free_tier_requests\"\n  quota_id: \"GenerateRequestsPerDayPerProjectPerModel-FreeTier\"\n  quota_dimensions {\n    key: \"model\"\n    value: \"gemini-2.5-flash\"\n  }\n  quota_dimensions {\n    key: \"location\"\n    value: \"global\"\n  }\n  quota_value: 20\n}\n, retry_delay {\n  seconds: 51\n}\n]"
+    }
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "running",
+    "message": "Searching for UNKNOWN datasheet..."
+  },
+  {
+    "type": "step",
+    "step": "scrape",
+    "title": "Searching OEM Datasheet",
+    "status": "completed",
+    "message": "Datasheet retrieved successfully",
+    "data": {
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/personal_api_results/datasheets/UNKNOWN_tavily.pdf",
+      "source": "scraped"
+    }
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "running",
+    "message": "Parsing datasheet and extracting mechanical diagrams..."
+  },
+  {
+    "type": "step",
+    "step": "parse",
+    "title": "Extracting Parameters",
+    "status": "completed",
+    "message": "Mechanical specifications extracted",
+    "data": {
+      "mechanical_diagram": "diagrams/UNKNOWN_tavily_mechanical_UNKNOWN_page1.png",
+      "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/personal_api_results/datasheets/UNKNOWN_tavily.pdf",
+      "parsed_specs": {
+        "package_dimensions": {
+          "length_mm": null,
+          "width_mm": null,
+          "height_mm": null,
+          "pin_count": null,
+          "pin_pitch_mm": null,
+          "package_type": "UNKNOWN"
+        },
+        "manufacturer": "UNKNOWN",
+        "physical_features": []
+      }
+    }
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "running",
+    "message": "Measuring IC body dimensions..."
+  },
+  {
+    "type": "step",
+    "step": "dimension",
+    "title": "Dimension Analysis",
+    "status": "completed",
+    "message": "Dimensions: AR = 1.14",
+    "visualization": "http://localhost:5001/api/download?file=dimension_analysis_bd160436-c000-4892-8b94-35f6f67e5c2d_0_51dc6e21ce395f0807000000_dimension_analysis.png",
+    "data": {
+      "measured_aspect_ratio": 1.142,
+      "expected_aspect_ratio": null,
+      "confidence_score": 100.0,
+      "bboxes": [
+        {
+          "type": "ic_body",
+          "x": 382,
+          "y": 335,
+          "w": 766,
+          "h": 671,
+          "rw": 766,
+          "rh": 671,
+          "angle": 0,
+          "box_pts": [
+            [
+              382,
+              335
+            ],
+            [
+              1148,
+              335
+            ],
+            [
+              1148,
+              1006
+            ],
+            [
+              382,
+              1006
+            ]
+          ],
+          "label": "IC Body: 766×671 px (AR: 1.142)"
+        }
+      ],
+      "body_width_px": 766,
+      "body_height_px": 671,
+      "verdict": "MATCH",
+      "dimension_source": "no_ground_truth",
+      "expected_length_mm": null,
+      "expected_width_mm": null
+    }
+  },
+  {
+    "type": "step",
+    "step": "visual",
+    "title": "Visual Comparison",
+    "status": "running",
+    "message": "Comparing IC with datasheet using Gemini..."
+  }
+]

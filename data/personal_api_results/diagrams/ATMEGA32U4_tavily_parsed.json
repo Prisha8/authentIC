@@ -1,0 +1,32 @@
+{
+  "part_number": "ATMEGA32U4",
+  "manufacturer": "Atmel",
+  "package_dimensions": {
+    "length_mm": null,
+    "width_mm": null,
+    "height_mm": null,
+    "pin_count": 44,
+    "pin_pitch_mm": null,
+    "package_type": "TQFP"
+  },
+  "pin_count": null,
+  "description": null,
+  "features": [],
+  "mechanical_pages": [
+    25
+  ],
+  "pin_config_pages": [
+    3,
+    5
+  ],
+  "mechanical_diagrams": [
+    "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/personal_api_results/diagrams/ATMEGA32U4_tavily_mechanical_TQFP_page25.png"
+  ],
+  "electrical_specs": {},
+  "source_pdf": "/Users/shnjnmkkr/Desktop/SIH again/counterfeit_IC/data/personal_api_results/datasheets/ATMEGA32U4_tavily.pdf",
+  "parsing_metadata": {
+    "total_mechanical_pages": 1,
+    "total_diagrams_extracted": 1,
+    "pin_config_pages": 2
+  }
+}

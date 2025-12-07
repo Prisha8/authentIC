@@ -1,0 +1,8 @@
+{
+  "step": "scrape",
+  "timestamp": "2025-12-06T14:17:15.103340",
+  "data": {
+    "datasheet_path": "/Users/shnjnmkkr/Desktop/SIH again/data/api_results/datasheets/STM32F107RCT7_tavily.pdf",
+    "source": "scraped"
+  }
+}

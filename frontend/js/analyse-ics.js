@@ -161,6 +161,10 @@ async function handleSubmit(event) {
       formData.append('additional_info', infoInput.value.trim());
     }
     
+    // Get user type and add to form data
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    formData.append('user_type', userType);
+    
     // Call API
     const response = await fetch('http://localhost:5001/api/detect', {
       method: 'POST',
@@ -234,6 +238,16 @@ async function pollProgress(sessionId) {
             // If complete, load final results and PDF
             if (data.type === 'complete') {
               await loadFinalResults(sessionId);
+              
+              // Show notification
+              if (window.notificationService) {
+                window.notificationService.addNotification(
+                  'Analysis Complete',
+                  'Your IC analysis has been completed successfully. View results in the dashboard.',
+                  'success',
+                  { label: 'View Dashboard', url: 'dashboard.html' }
+                );
+              }
             }
           } catch (e) {
             console.warn('[Analyse ICs] Failed to parse progress:', e);
@@ -314,7 +328,8 @@ async function loadPdfViewer(pdfPath) {
   let pdfUrl = pdfPath;
   if (!pdfPath.startsWith('http')) {
     // If it's a relative path, construct full URL
-    pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(pdfPath)}`;
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(pdfPath)}&user_type=${userType}`;
   }
   
   pdfViewer.src = pdfUrl;

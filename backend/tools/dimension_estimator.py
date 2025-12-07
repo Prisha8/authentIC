@@ -374,12 +374,20 @@ def estimate_dimensions(
     return result
 
 
-def visualize_dimensions(image_path: str, result: DimensionResult):
+def visualize_dimensions(image_path: str, result: DimensionResult, output_path: Optional[str] = None):
     """
     Create a clean visualization showing only the image with detected IC body bbox.
     All detailed metrics will be shown in the PDF table instead.
+    
+    Args:
+        image_path: Path to input image
+        result: DimensionResult object
+        output_path: Optional output path. If not provided, saves next to input image.
     """
     img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Could not read image: {image_path}")
+    
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
     fig, ax = plt.subplots(figsize=(12, 9))
@@ -426,12 +434,22 @@ def visualize_dimensions(image_path: str, result: DimensionResult):
     
     plt.tight_layout()
     
-    # Always save to PNG alongside the original, avoid overwriting non-PNG inputs
-    img_path = Path(image_path)
-    output_path = str(img_path.with_name(f"{img_path.stem}_dimension_analysis.png"))
+    # Use provided output_path or save next to original image
+    if output_path is None:
+        img_path = Path(image_path)
+        output_path = str(img_path.with_name(f"{img_path.stem}_dimension_analysis.png"))
+    else:
+        output_path = str(output_path)
+    
+    # Ensure output directory exists
+    output_path_obj = Path(output_path)
+    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    
     plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()  # Close to avoid display issues
     print(f"✅ Saved visualization: {output_path}")
+    
+    return output_path
 
 
 def save_results(result: DimensionResult, output_path: str):
@@ -498,5 +516,6 @@ if __name__ == '__main__':
     json_path = image_path.replace('.png', '_dimension_results.json')
     save_results(result, json_path)
     
+    # Use default output path (next to image)
     visualize_dimensions(image_path, result)
 

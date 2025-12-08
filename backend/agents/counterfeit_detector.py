@@ -30,10 +30,11 @@ try:
     from PIL import Image, ImageDraw, ImageFont
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak, Table, TableStyle
+    from reportlab.platypus import SimpleDocTemplate, BaseDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak, Table, TableStyle, PageTemplate, Frame
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.pdfgen import canvas
 except ImportError:
     print("Missing dependencies. Install with:")
     print("  pip install google-generativeai pillow reportlab")
@@ -1017,11 +1018,198 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
         # Create annotated images (one per anomaly)
         annotated_images = self._create_annotated_images(result)
         
-        # Build PDF
-        doc = SimpleDocTemplate(str(report_path), pagesize=letter)
+        # Track section boundary - we'll count pages as we build
+        # Section 1 (OEM) typically takes 1-2 pages, Section 2 (Final Report) starts after PageBreak
+        oem_pages_estimate = 2  # Estimate: OEM section is usually 1-2 pages
+        
+        # Page numbering callback
+        def add_page_number(canv, doc):
+            page_num = canv.getPageNumber()
+            
+            # Determine section based on page number
+            # Section 1 (OEM datasheet): pages 1-2 (typically)
+            # Section 2 (Final report): pages 3+
+            # This is a reasonable estimate since OEM section is usually 1-2 pages
+            if page_num <= oem_pages_estimate:
+                section_num = 1
+            else:
+                section_num = 2
+            
+            # Draw page number at bottom right
+            canv.saveState()
+            canv.setFont("Helvetica", 9)
+            canv.setFillColor(colors.grey)
+            page_text = f"{section_num}/2"
+            page_width = letter[0]
+            canv.drawRightString(page_width - 0.5*inch, 0.5*inch, page_text)
+            canv.restoreState()
+        
+        # Build PDF with page template
+        doc = BaseDocTemplate(str(report_path), pagesize=letter)
         styles = getSampleStyleSheet()
+        
+        # Create frame for content
+        frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, 
+                     leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
+        template = PageTemplate(id='normal', frames=frame, onPage=add_page_number)
+        doc.addPageTemplates([template])
+        
         story = []
         
+        # ========== SECTION 1: OEM DATASHEET (Page 1/2) ==========
+        # Mechanical Diagram (Outline Dimension Page) with Dimensions Table and Download
+        if result.mechanical_diagram_path and Path(result.mechanical_diagram_path).exists():
+            story.append(Paragraph("DATASHEET OUTLINE DIMENSION PAGE", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            
+            # Add description
+            story.append(Paragraph(
+                "The following page shows the exact mechanical outline diagram extracted from the OEM datasheet. "
+                "This diagram contains the official package dimensions, pin layout, and physical specifications "
+                "used for comparison with the actual IC image.",
+                styles['Normal']
+            ))
+            story.append(Spacer(1, 0.15*inch))
+            
+            # Extract dimensions from mechanical diagram if not already extracted
+            extracted_dims = None
+            if result.parsed_specs and result.parsed_specs.get('package_dimensions'):
+                # Use already extracted dimensions
+                extracted_dims = result.parsed_specs['package_dimensions']
+            else:
+                # Try to extract dimensions now
+                print("  → Extracting dimensions from mechanical diagram for report...")
+                extracted_dims = self._extract_dimensions_with_gemini(result.mechanical_diagram_path)
+                if extracted_dims:
+                    # Store for later use
+                    if result.parsed_specs is None:
+                        result.parsed_specs = {}
+                    result.parsed_specs['package_dimensions'] = extracted_dims
+            
+            # Show diagram (ensure it fits within page margins)
+            try:
+                # Use proportional scaling to ensure it fits
+                diagram_img = RLImage(result.mechanical_diagram_path, width=5.5*inch, height=8*inch, kind='proportional')
+                story.append(diagram_img)
+                story.append(Spacer(1, 0.2*inch))
+            except Exception as e:
+                print(f"  ⚠️  Failed to load diagram image: {e}")
+                story.append(Paragraph(f"<i>Diagram image could not be loaded: {str(e)}</i>", styles['Normal']))
+                story.append(Spacer(1, 0.2*inch))
+            
+            # Dimensions Table (if extracted)
+            if extracted_dims:
+                story.append(Paragraph("EXTRACTED DIMENSIONS FROM DIAGRAM", styles['Heading3']))
+                story.append(Spacer(1, 0.08*inch))
+                story.append(Paragraph(
+                    "The following dimensions were extracted from the mechanical diagram above using AI analysis:",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.1*inch))
+                
+                dim_table_data = [['Parameter', 'Value']]
+                
+                # Add all available dimensions
+                if extracted_dims.get('body_length_mm'):
+                    dim_table_data.append(['Body Length', f"{extracted_dims['body_length_mm']} mm"])
+                if extracted_dims.get('body_width_mm'):
+                    dim_table_data.append(['Body Width', f"{extracted_dims['body_width_mm']} mm"])
+                if extracted_dims.get('height_mm'):
+                    dim_table_data.append(['Height/Thickness', f"{extracted_dims['height_mm']} mm"])
+                if extracted_dims.get('pin_count'):
+                    dim_table_data.append(['Pin Count', str(extracted_dims['pin_count'])])
+                if extracted_dims.get('pin_pitch_mm'):
+                    dim_table_data.append(['Pin Pitch', f"{extracted_dims['pin_pitch_mm']} mm"])
+                if extracted_dims.get('package_type'):
+                    dim_table_data.append(['Package Type', extracted_dims['package_type']])
+                
+                if len(dim_table_data) > 1:  # More than just header
+                    dims_table = Table(dim_table_data, colWidths=[2.5*inch, 3.7*inch])
+                    dims_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a4a4a')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                        ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8e8e8')),
+                        ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#333333')),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 10.5),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+                        ('PADDING', (0, 0), (-1, -1), 6),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ]))
+                    story.append(dims_table)
+                    story.append(Spacer(1, 0.15*inch))
+            else:
+                story.append(Paragraph(
+                    "<i>Note: Dimension extraction from diagram was not available. Dimensions may be available from parsed datasheet data.</i>",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.15*inch))
+            
+            # Download OEM Datasheet information
+            if result.datasheet_path and Path(result.datasheet_path).exists():
+                story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading3']))
+                story.append(Spacer(1, 0.08*inch))
+                datasheet_filename = Path(result.datasheet_path).name
+                
+                # Create a clickable link to the datasheet
+                # Extract relative path for the link
+                datasheet_rel_path = str(result.datasheet_path)
+                if 'api_results' in datasheet_rel_path:
+                    # Extract path relative to api_results
+                    parts = datasheet_rel_path.split('api_results')
+                    if len(parts) > 1:
+                        datasheet_rel_path = parts[-1].lstrip('/\\')
+                    else:
+                        # Just use the filename
+                        datasheet_rel_path = datasheet_filename
+                elif 'datasheets' in datasheet_rel_path:
+                    # Extract from datasheets folder
+                    idx = datasheet_rel_path.find('datasheets')
+                    datasheet_rel_path = datasheet_rel_path[idx:]
+                else:
+                    datasheet_rel_path = f"datasheets/{datasheet_filename}"
+                
+                # Create link text with proper formatting
+                link_text = f'<link href="file://{result.datasheet_path}" color="blue"><u>Download Datasheet PDF</u></link>'
+                
+                story.append(Paragraph(
+                    f"<b>Source File:</b> {datasheet_filename}<br/>"
+                    f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
+                    f"<b>OEM Datasheet PDF:</b><br/>"
+                    f"{link_text}<br/><br/>"
+                    f"<i>The complete OEM datasheet PDF is available in the detection results directory. "
+                    f"This document contains the full technical specifications, electrical characteristics, "
+                    f"and mechanical drawings for this IC part number.</i>",
+                    styles['Normal']
+                ))
+                story.append(Spacer(1, 0.2*inch))
+        elif result.datasheet_path and Path(result.datasheet_path).exists():
+            # If no diagram but datasheet exists, still show datasheet info
+            story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            datasheet_filename = Path(result.datasheet_path).name
+            
+            # Create a clickable link to the datasheet
+            link_text = f'<link href="file://{result.datasheet_path}" color="blue"><u>Download Datasheet PDF</u></link>'
+            
+            story.append(Paragraph(
+                f"<b>Source File:</b> {datasheet_filename}<br/>"
+                f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
+                f"<b>OEM Datasheet PDF:</b><br/>"
+                f"{link_text}<br/><br/>"
+                f"<i>Note: Mechanical diagram extraction was not available, but the complete OEM datasheet PDF "
+                f"is available in the detection results directory.</i>",
+                styles['Normal']
+            ))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Mark end of OEM section and start of final report section
+        # We'll track this page number in the callback
+        story.append(PageBreak())
+        
+        # ========== SECTION 2: FINAL REPORT (Page 2/2) ==========
         # Title
         title_style = ParagraphStyle(
             'CustomTitle',
@@ -1265,128 +1453,6 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             ]))
             story.append(dim_table)
             story.append(Spacer(1, 0.12*inch))
-        
-        # Mechanical Diagram (Outline Dimension Page) with Dimensions Table and Download
-        if result.mechanical_diagram_path and Path(result.mechanical_diagram_path).exists():
-            story.append(PageBreak())
-            story.append(Paragraph("DATASHEET OUTLINE DIMENSION PAGE", styles['Heading2']))
-            story.append(Spacer(1, 0.1*inch))
-            
-            # Add description
-            story.append(Paragraph(
-                "The following page shows the exact mechanical outline diagram extracted from the OEM datasheet. "
-                "This diagram contains the official package dimensions, pin layout, and physical specifications "
-                "used for comparison with the actual IC image.",
-                styles['Normal']
-            ))
-            story.append(Spacer(1, 0.15*inch))
-            
-            # Extract dimensions from mechanical diagram if not already extracted
-            extracted_dims = None
-            if result.parsed_specs and result.parsed_specs.get('package_dimensions'):
-                # Use already extracted dimensions
-                extracted_dims = result.parsed_specs['package_dimensions']
-            else:
-                # Try to extract dimensions now
-                print("  → Extracting dimensions from mechanical diagram for report...")
-                extracted_dims = self._extract_dimensions_with_gemini(result.mechanical_diagram_path)
-                if extracted_dims:
-                    # Store for later use
-                    if result.parsed_specs is None:
-                        result.parsed_specs = {}
-                    result.parsed_specs['package_dimensions'] = extracted_dims
-            
-            # Show diagram (ensure it fits within page margins)
-            # Page frame is ~456x636 points, leave margins, so max ~400x580 points
-            # 1 inch = 72 points, so max ~5.5x8 inches
-            try:
-                # Use proportional scaling to ensure it fits
-                diagram_img = RLImage(result.mechanical_diagram_path, width=5.5*inch, height=8*inch, kind='proportional')
-                story.append(diagram_img)
-                story.append(Spacer(1, 0.2*inch))
-            except Exception as e:
-                print(f"  ⚠️  Failed to load diagram image: {e}")
-                story.append(Paragraph(f"<i>Diagram image could not be loaded: {str(e)}</i>", styles['Normal']))
-                story.append(Spacer(1, 0.2*inch))
-            
-            # Dimensions Table (if extracted)
-            if extracted_dims:
-                story.append(Paragraph("EXTRACTED DIMENSIONS FROM DIAGRAM", styles['Heading3']))
-                story.append(Spacer(1, 0.08*inch))
-                story.append(Paragraph(
-                    "The following dimensions were extracted from the mechanical diagram above using AI analysis:",
-                    styles['Normal']
-                ))
-                story.append(Spacer(1, 0.1*inch))
-                
-                dim_table_data = [['Parameter', 'Value']]
-                
-                # Add all available dimensions
-                if extracted_dims.get('body_length_mm'):
-                    dim_table_data.append(['Body Length', f"{extracted_dims['body_length_mm']} mm"])
-                if extracted_dims.get('body_width_mm'):
-                    dim_table_data.append(['Body Width', f"{extracted_dims['body_width_mm']} mm"])
-                if extracted_dims.get('height_mm'):
-                    dim_table_data.append(['Height/Thickness', f"{extracted_dims['height_mm']} mm"])
-                if extracted_dims.get('pin_count'):
-                    dim_table_data.append(['Pin Count', str(extracted_dims['pin_count'])])
-                if extracted_dims.get('pin_pitch_mm'):
-                    dim_table_data.append(['Pin Pitch', f"{extracted_dims['pin_pitch_mm']} mm"])
-                if extracted_dims.get('package_type'):
-                    dim_table_data.append(['Package Type', extracted_dims['package_type']])
-                
-                if len(dim_table_data) > 1:  # More than just header
-                    dims_table = Table(dim_table_data, colWidths=[2.5*inch, 3.7*inch])
-                    dims_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a4a4a')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('BACKGROUND', (0, 1), (0, -1), colors.HexColor('#e8e8e8')),
-                        ('TEXTCOLOR', (0, 1), (0, -1), colors.HexColor('#333333')),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 10.5),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
-                        ('PADDING', (0, 0), (-1, -1), 6),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ]))
-                    story.append(dims_table)
-                    story.append(Spacer(1, 0.15*inch))
-            else:
-                story.append(Paragraph(
-                    "<i>Note: Dimension extraction from diagram was not available. Dimensions may be available from parsed datasheet data.</i>",
-                    styles['Normal']
-                ))
-                story.append(Spacer(1, 0.15*inch))
-            
-            # Download OEM Datasheet information
-            if result.datasheet_path and Path(result.datasheet_path).exists():
-                story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading3']))
-                story.append(Spacer(1, 0.08*inch))
-                datasheet_filename = Path(result.datasheet_path).name
-                story.append(Paragraph(
-                    f"<b>Source File:</b> {datasheet_filename}<br/>"
-                    f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
-                    f"<i>The complete OEM datasheet PDF is available in the detection results directory. "
-                    f"This document contains the full technical specifications, electrical characteristics, "
-                    f"and mechanical drawings for this IC part number.</i>",
-                    styles['Normal']
-                ))
-                story.append(Spacer(1, 0.2*inch))
-        elif result.datasheet_path and Path(result.datasheet_path).exists():
-            # If no diagram but datasheet exists, still show datasheet info
-            story.append(PageBreak())
-            story.append(Paragraph("OEM DATASHEET REFERENCE", styles['Heading2']))
-            story.append(Spacer(1, 0.1*inch))
-            datasheet_filename = Path(result.datasheet_path).name
-            story.append(Paragraph(
-                f"<b>Source File:</b> {datasheet_filename}<br/>"
-                f"<b>Location:</b> {result.datasheet_path}<br/><br/>"
-                f"<i>Note: Mechanical diagram extraction was not available, but the complete OEM datasheet PDF "
-                f"is available in the detection results directory.</i>",
-                styles['Normal']
-            ))
-            story.append(Spacer(1, 0.2*inch))
         
         # Detailed Visual Analysis Section
         if result.visual_comparison:

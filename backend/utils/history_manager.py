@@ -19,6 +19,15 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 from agents.counterfeit_detector import DetectionResult
 
+# Import PyPDF2 for PDF text extraction
+try:
+    import PyPDF2
+    PDF2_AVAILABLE = True
+except ImportError:
+    PDF2_AVAILABLE = False
+    print("[History] Warning: PyPDF2 not available. PDF text extraction will be skipped.")
+    print("[History] Install with: pip install PyPDF2>=3.0.0")
+
 
 class HistoryManager:
     """Manages saving and loading of processing history"""
@@ -228,17 +237,17 @@ class HistoryManager:
     
     def _extract_pdf_text(self, pdf_path: Path) -> str:
         """Extract text content from PDF for RAG indexing"""
+        if not PDF2_AVAILABLE:
+            print("[History] PyPDF2 not available, skipping PDF text extraction")
+            return ""
+        
         try:
-            import PyPDF2
             text_content = []
             with open(pdf_path, 'rb') as f:
                 pdf_reader = PyPDF2.PdfReader(f)
                 for page in pdf_reader.pages:
                     text_content.append(page.extract_text())
             return '\n\n'.join(text_content)
-        except ImportError:
-            print("[History] PyPDF2 not available, skipping PDF text extraction")
-            return ""
         except Exception as e:
             print(f"[History] Error extracting PDF text: {e}")
             return ""

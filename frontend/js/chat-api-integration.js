@@ -252,7 +252,7 @@ function buildDownloadUrl(filePath) {
       { text: 'Identifying IC from image', key: 'identification' },
       { text: 'Searching for OEM datasheet', key: 'datasheet_search' },
       { text: 'Parsing datasheet and extracting diagrams', key: 'datasheet_parse' },
-      { text: 'Estimating dimensions using computer vision', key: 'gemini_extraction' },
+      { text: 'Estimating dimensions using computer vision', key: 'vlm_extraction' },
       { text: 'Analyzing physical dimensions', key: 'dimension_analysis' },
       { text: 'Performing visual analysis', key: 'visual_analysis' },
       { text: 'Computing final verdict', key: 'verdict' },

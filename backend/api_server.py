@@ -612,7 +612,7 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'step': 'identify',
             'title': 'Identifying IC',
             'status': 'running',
-            'message': 'Analyzing IC image with Gemini...'
+            'message': 'Analyzing IC image with VLM...'
         })
         # Use primary image for identification (can be enhanced to use all images)
         image_path_abs = primary_image_path.resolve()
@@ -897,7 +897,7 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'step': 'visual',
             'title': 'Visual Comparison',
             'status': 'running',
-            'message': 'Comparing IC with datasheet using Gemini...'
+            'message': 'Comparing IC with datasheet using VLM...'
         })
         # Pass all images for multi-view analysis
         visual_result = detector._gemini_visual_analysis(

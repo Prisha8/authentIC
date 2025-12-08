@@ -934,18 +934,46 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             }
     
     def _calculate_verdict(self, result: DetectionResult):
-        """Step 6: Calculate final verdict based on all analyses"""
+        """Step 6: Calculate final verdict based on all analyses
+        
+        Scoring weights:
+        - Dimension analysis: 50% (increased from 30%) - critical physical measurements
+        - Visual analysis: 30% (decreased from 50%) - subjective visual inspection
+        - Anomaly penalty: up to 30 points deduction
+        """
         
         scores = []
         weights = []
         
-        # Dimension analysis score
+        # Dimension analysis score (INCREASED WEIGHT: 50%)
         if result.dimension_analysis:
-            dim_score = result.dimension_analysis.get('confidence_score', 50)
+            dim_data = result.dimension_analysis
+            dim_score = dim_data.get('confidence_score', 50)
+            
+            # Apply additional penalties based on dimension verdict
+            dim_verdict = dim_data.get('verdict', 'UNKNOWN')
+            aspect_match = dim_data.get('aspect_ratio_match', None)
+            aspect_error = dim_data.get('aspect_ratio_error_percent', None)
+            
+            # Critical: If dimensions don't match, heavily penalize
+            if dim_verdict == 'MISMATCH' or (aspect_match is False):
+                # If aspect ratio error > 10%, this is a major red flag
+                if aspect_error is not None and aspect_error > 10:
+                    dim_score = max(0, dim_score - 30)  # Heavy penalty for dimension mismatch
+                elif aspect_error is not None and aspect_error > 5:
+                    dim_score = max(0, dim_score - 15)  # Moderate penalty
+                elif aspect_error is None:
+                    # If verdict is MISMATCH but no error data, still penalize
+                    dim_score = max(0, dim_score - 20)
+            
+            # Boost score if dimensions match well
+            if dim_verdict == 'MATCH' and (aspect_match is True) and (aspect_error is not None and aspect_error < 3):
+                dim_score = min(100, dim_score + 5)  # Small boost for excellent match
+            
             scores.append(dim_score)
-            weights.append(0.3)
+            weights.append(0.5)  # Increased from 0.3 to 0.5
         
-        # Visual analysis score
+        # Visual analysis score (DECREASED WEIGHT: 30%)
         if result.visual_comparison:
             visual_assessment = result.visual_comparison.get('overall_assessment', 'unknown')
             text_quality = result.visual_comparison.get('text_quality_score', 50)
@@ -959,7 +987,7 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
             }
             visual_score = (assessment_scores.get(visual_assessment, 50) + text_quality) / 2
             scores.append(visual_score)
-            weights.append(0.5)
+            weights.append(0.3)  # Decreased from 0.5 to 0.3
         
         # Anomaly penalty
         anomaly_count = len(result.anomalies)
@@ -985,13 +1013,22 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
         else:
             result.verdict = "LIKELY COUNTERFEIT"
         
-        # Build reasoning
+        # Build reasoning with more detail about dimension analysis
         reasoning_parts = []
         
         if result.dimension_analysis:
-            reasoning_parts.append(
-                f"Dimensional analysis: {result.dimension_analysis.get('confidence_score', 0):.1f}/100"
-            )
+            dim_data = result.dimension_analysis
+            dim_score = dim_data.get('confidence_score', 0)
+            dim_verdict = dim_data.get('verdict', 'UNKNOWN')
+            aspect_match = dim_data.get('aspect_ratio_match', None)
+            aspect_error = dim_data.get('aspect_ratio_error_percent', None)
+            
+            dim_reason = f"Dimensional analysis: {dim_score:.1f}/100"
+            if dim_verdict != 'UNKNOWN':
+                dim_reason += f" (verdict: {dim_verdict})"
+            if aspect_error is not None:
+                dim_reason += f" (error: {aspect_error:.1f}%)"
+            reasoning_parts.append(dim_reason)
         
         if result.visual_comparison:
             reasoning_parts.append(
@@ -1007,6 +1044,16 @@ Provide bounding boxes [x1, y1, x2, y2] as normalized coordinates (0.0-1.0) for 
         
         print(f"  Final Score: {result.authenticity_score}/100")
         print(f"  Verdict: {result.verdict}")
+        
+        # Print scoring weights breakdown
+        weight_info = []
+        if result.dimension_analysis:
+            weight_info.append(f"Dimension={weights[0]*100:.0f}%")
+        if result.visual_comparison and len(weights) > (1 if result.dimension_analysis else 0):
+            idx = 1 if result.dimension_analysis else 0
+            weight_info.append(f"Visual={weights[idx]*100:.0f}%")
+        if weight_info:
+            print(f"  Scoring weights: {', '.join(weight_info)}")
     
     def _generate_report(self, result: DetectionResult) -> str:
         """Step 7: Generate PDF report with bboxes and analysis"""

@@ -178,6 +178,60 @@ class VectorDB:
                 USING gin(to_tsvector('english', search_text));
             """)
             
+            # Create annotations table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ic_annotations (
+                    id SERIAL PRIMARY KEY,
+                    session_id VARCHAR(255) NOT NULL,
+                    image_path VARCHAR(500) NOT NULL,
+                    annotation_id VARCHAR(255) UNIQUE NOT NULL,
+                    
+                    -- Bounding box coordinates (normalized 0-1)
+                    bbox_x FLOAT NOT NULL,
+                    bbox_y FLOAT NOT NULL,
+                    bbox_width FLOAT NOT NULL,
+                    bbox_height FLOAT NOT NULL,
+                    
+                    -- Annotation metadata
+                    label VARCHAR(255),
+                    description TEXT,
+                    annotation_type VARCHAR(100),
+                    severity VARCHAR(20),
+                    verified BOOLEAN DEFAULT FALSE,
+                    
+                    -- User feedback
+                    user_id VARCHAR(255),
+                    user_notes TEXT,
+                    correction_to_ai BOOLEAN DEFAULT FALSE,
+                    
+                    -- Embedding for RAG search
+                    embedding vector(384),
+                    search_text TEXT,
+                    
+                    -- Timestamps
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            
+            # Create indexes for annotations
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_annotations_session_id 
+                ON ic_annotations(session_id);
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_annotations_image_path 
+                ON ic_annotations(image_path);
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_annotations_embedding 
+                ON ic_annotations 
+                USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64);
+            """)
+            
             conn.commit()
             print("[VectorDB] Schema initialized successfully")
             
@@ -555,6 +609,173 @@ class VectorDB:
             
         except Exception as e:
             print(f"[VectorDB] Error getting all history: {e}")
+            traceback.print_exc()
+            return []
+        finally:
+            if conn:
+                self._return_connection(conn)
+    
+    def store_annotation(self, session_id: str, annotation: Dict) -> bool:
+        """Store annotation with embedding"""
+        conn = None
+        try:
+            # Generate searchable text
+            search_text_parts = []
+            if annotation.get('label'):
+                search_text_parts.append(f"Label: {annotation['label']}")
+            if annotation.get('description'):
+                search_text_parts.append(annotation['description'])
+            if annotation.get('annotation_type'):
+                search_text_parts.append(f"Type: {annotation['annotation_type']}")
+            if annotation.get('correction_to_ai'):
+                search_text_parts.append("[CORRECTS AI ANALYSIS]")
+            
+            search_text = " ".join(search_text_parts)
+            
+            # Generate embedding
+            embedding = self._generate_embedding(search_text)
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            embedding_str = None
+            if embedding:
+                embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+            
+            cursor.execute("""
+                INSERT INTO ic_annotations (
+                    session_id, image_path, annotation_id,
+                    bbox_x, bbox_y, bbox_width, bbox_height,
+                    label, description, annotation_type, severity,
+                    verified, user_id, user_notes, correction_to_ai,
+                    embedding, search_text
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s
+                )
+                ON CONFLICT (annotation_id) 
+                DO UPDATE SET
+                    label = EXCLUDED.label,
+                    description = EXCLUDED.description,
+                    annotation_type = EXCLUDED.annotation_type,
+                    severity = EXCLUDED.severity,
+                    verified = EXCLUDED.verified,
+                    user_notes = EXCLUDED.user_notes,
+                    correction_to_ai = EXCLUDED.correction_to_ai,
+                    embedding = EXCLUDED.embedding,
+                    search_text = EXCLUDED.search_text,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (
+                session_id,
+                annotation.get('image_path', ''),
+                annotation.get('annotation_id'),
+                annotation.get('bbox_x', 0),
+                annotation.get('bbox_y', 0),
+                annotation.get('bbox_width', 0),
+                annotation.get('bbox_height', 0),
+                annotation.get('label'),
+                annotation.get('description'),
+                annotation.get('annotation_type'),
+                annotation.get('severity'),
+                annotation.get('verified', False),
+                annotation.get('user_id'),
+                annotation.get('user_notes'),
+                annotation.get('correction_to_ai', False),
+                embedding_str,
+                search_text
+            ))
+            
+            conn.commit()
+            print(f"[VectorDB] Stored annotation {annotation.get('annotation_id')}")
+            return True
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(f"[VectorDB] Error storing annotation: {e}")
+            traceback.print_exc()
+            return False
+        finally:
+            if conn:
+                self._return_connection(conn)
+    
+    def get_annotations_for_session(self, session_id: str) -> List[Dict]:
+        """Get all annotations for a session"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT * FROM ic_annotations
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+            """, (session_id,))
+            
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            print(f"[VectorDB] Error getting annotations: {e}")
+            traceback.print_exc()
+            return []
+        finally:
+            if conn:
+                self._return_connection(conn)
+    
+    def search_annotations(self, query: str, limit: int = 10, 
+                          filters: Optional[Dict] = None) -> List[Dict]:
+        """Vector search across annotations"""
+        conn = None
+        try:
+            query_embedding = self._generate_embedding(query)
+            if query_embedding is None:
+                return []
+            
+            conn = self._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            where_clauses = []
+            params = []
+            
+            if filters:
+                if filters.get('annotation_type'):
+                    where_clauses.append("annotation_type = %s")
+                    params.append(filters['annotation_type'])
+                if filters.get('severity'):
+                    where_clauses.append("severity = %s")
+                    params.append(filters['severity'])
+                if filters.get('correction_to_ai') is not None:
+                    where_clauses.append("correction_to_ai = %s")
+                    params.append(filters['correction_to_ai'])
+            
+            where_sql = " AND " + " AND ".join(where_clauses) if where_clauses else ""
+            
+            # Convert embedding to proper vector format for PostgreSQL
+            query_embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+            
+            sql = f"""
+                SELECT 
+                    *,
+                    1 - (embedding <=> %s::vector) as similarity
+                FROM ic_annotations
+                WHERE embedding IS NOT NULL {where_sql}
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            """
+            
+            # Build params in correct order: 
+            # 1. SELECT similarity calculation (%s::vector)
+            # 2. WHERE clause params (if any)
+            # 3. ORDER BY (%s::vector)
+            # 4. LIMIT (%s)
+            params_final = [query_embedding_str] + params + [query_embedding_str, limit]
+            cursor.execute(sql, params_final)
+            results = cursor.fetchall()
+            
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            print(f"[VectorDB] Error searching annotations: {e}")
             traceback.print_exc()
             return []
         finally:

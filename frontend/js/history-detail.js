@@ -119,10 +119,35 @@ window.openHistoryDetailModal = async function(sessionId) {
       // API returns {status: 'success', detail: {...}}
       currentHistoryDetail = data.detail;
       renderHistoryDetail(data.detail);
+      // Update the history card in sidebar with correct data
+      console.log('[History Detail] Calling updateHistoryCard with sessionId:', sessionId);
+      if (typeof window.updateHistoryCard === 'function') {
+        // Call immediately
+        window.updateHistoryCard(sessionId, data.detail);
+        // Also retry after a short delay in case DOM isn't ready
+        setTimeout(() => {
+          console.log('[History Detail] Retrying updateHistoryCard after delay');
+          window.updateHistoryCard(sessionId, data.detail);
+        }, 100);
+      } else {
+        console.error('[History Detail] updateHistoryCard function not available!');
+      }
     } else if (data && !data.error && (data.metadata || data.analysis)) {
       // API returns detail directly
       currentHistoryDetail = data;
       renderHistoryDetail(data);
+      // Update the history card in sidebar with correct data
+      console.log('[History Detail] Calling updateHistoryCard with sessionId:', sessionId);
+      if (typeof window.updateHistoryCard === 'function') {
+        window.updateHistoryCard(sessionId, data);
+        // Also retry after a short delay in case DOM isn't ready
+        setTimeout(() => {
+          console.log('[History Detail] Retrying updateHistoryCard after delay');
+          window.updateHistoryCard(sessionId, data);
+        }, 100);
+      } else {
+        console.error('[History Detail] updateHistoryCard function not available!');
+      }
     } else {
       console.error('[History Detail] Failed to load:', data);
       if (content) {
@@ -150,9 +175,12 @@ if (typeof window.openHistoryDetailModal === 'function') {
   console.error('[History Detail] ✗ Failed to export openHistoryDetailModal');
 }
 
-// Use existing API_BASE_URL if available, otherwise declare it
-const API_BASE_URL = window.API_BASE_URL || 'http://localhost:5001';
-window.API_BASE_URL = API_BASE_URL; // Store for other scripts
+// Use existing API_BASE_URL if available, otherwise set it
+if (!window.API_BASE_URL) {
+  window.API_BASE_URL = 'http://localhost:5001';
+}
+// Use var instead of const to allow redeclaration when both history-detail files are loaded
+var API_BASE_URL = window.API_BASE_URL;
 
 let currentHistoryDetail = null;
 let activeTab = 'ic-details';
@@ -236,6 +264,9 @@ function renderHistoryDetail(detail) {
       <button class="tab-btn ${activeTab === 'parse' ? 'active' : ''}" onclick="switchHistoryTab('parse')" ${toolOutputs.parse ? '' : 'style="display:none"'}>
         Datasheet Parse
       </button>
+      <button class="tab-btn ${activeTab === 'pin_counter' ? 'active' : ''}" onclick="switchHistoryTab('pin_counter')" ${analysis.pin_counter ? '' : 'style=\"display:none\"'}>
+        Pin Counter
+      </button>
       <button class="tab-btn ${activeTab === 'dimension' ? 'active' : ''}" onclick="switchHistoryTab('dimension')" ${analysis.dimension_analysis ? '' : 'style="display:none"'}>
         Dimension Analysis
       </button>
@@ -293,6 +324,8 @@ function getTabLabel(tabName) {
     'identify': 'Identification',
     'scrape': 'Datasheet Scrape',
     'parse': 'Datasheet Parse',
+    'pin_counter': 'Pin Counter',
+    'histogram': 'Histogram Filters',
     'dimension': 'Dimension Analysis',
     'visual': 'Visual Analysis',
     'oem-info': 'OEM Info',
@@ -314,8 +347,12 @@ function renderTabContent(tabName, detail, analysis, filePaths, toolOutputs) {
       return renderToolOutput('scrape', toolOutputs.scrape, 'Datasheet Scraping');
     case 'parse':
       return renderToolOutput('parse', toolOutputs.parse, 'Datasheet Parsing');
+    case 'pin_counter':
+      return renderToolOutput('pin_counter', analysis.pin_counter, 'Pin Counter');
     case 'dimension':
       return renderDimensionAnalysis(analysis.dimension_analysis, filePaths);
+    case 'histogram':
+      return renderHistogramAnalysis(analysis.histogram_analysis, filePaths, analysis.visual_comparison);
     case 'visual':
       return renderVisualAnalysis(analysis.visual_comparison, analysis.anomalies);
     case 'oem-info':
@@ -331,72 +368,99 @@ function renderTabContent(tabName, detail, analysis, filePaths, toolOutputs) {
  * Render tool output with proper previews
  */
 function renderToolOutput(toolName, toolData, toolTitle) {
-  if (!toolData) {
+  const resolvedData = (toolData && typeof toolData === 'object' && 'data' in toolData)
+    ? (toolData.data || {})
+    : toolData;
+
+  if (!resolvedData) {
     return '<div class="tab-content-section"><p>No output available for this tool</p></div>';
   }
   
   let html = `<div class="tab-content-section"><h3>${toolTitle}</h3>`;
   
   // Handle different tool types with specific previews
-  if (toolName === 'identify' && typeof toolData === 'object') {
+  if (toolName === 'identify' && typeof resolvedData === 'object') {
     // IC Identification preview
     html += '<div class="tool-preview">';
-    if (toolData.part_number) {
-      html += `<div class="preview-item"><strong>Part Number:</strong> ${escapeHtml(toolData.part_number)}</div>`;
+    if (resolvedData.part_number) {
+      html += `<div class="preview-item"><strong>Part Number:</strong> ${escapeHtml(resolvedData.part_number)}</div>`;
     }
-    if (toolData.manufacturer) {
-      html += `<div class="preview-item"><strong>Manufacturer:</strong> ${escapeHtml(toolData.manufacturer)}</div>`;
+    if (resolvedData.manufacturer) {
+      html += `<div class="preview-item"><strong>Manufacturer:</strong> ${escapeHtml(resolvedData.manufacturer)}</div>`;
     }
-    if (toolData.package_type) {
-      html += `<div class="preview-item"><strong>Package:</strong> ${escapeHtml(toolData.package_type)}</div>`;
+    if (resolvedData.package_type) {
+      html += `<div class="preview-item"><strong>Package:</strong> ${escapeHtml(resolvedData.package_type)}</div>`;
     }
-    if (toolData.pin_count) {
-      html += `<div class="preview-item"><strong>Pin Count:</strong> ${toolData.pin_count}</div>`;
+    if (resolvedData.pin_count) {
+      html += `<div class="preview-item"><strong>Pin Count:</strong> ${resolvedData.pin_count}</div>`;
     }
-    if (toolData.confidence) {
-      html += `<div class="preview-item"><strong>Confidence:</strong> ${toolData.confidence}%</div>`;
+    if (resolvedData.confidence) {
+      html += `<div class="preview-item"><strong>Confidence:</strong> ${resolvedData.confidence}%</div>`;
     }
     html += '</div>';
     html += '<details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre>`;
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre>`;
     html += '</details>';
-  } else if (toolName === 'scrape' && typeof toolData === 'object') {
+  } else if (toolName === 'scrape' && typeof resolvedData === 'object') {
     // Datasheet scrape preview
     html += '<div class="tool-preview">';
-    if (toolData.datasheet_url) {
-      html += `<div class="preview-item"><strong>Datasheet URL:</strong> <a href="${escapeHtml(toolData.datasheet_url)}" target="_blank">${escapeHtml(toolData.datasheet_url)}</a></div>`;
+    if (resolvedData.datasheet_url) {
+      html += `<div class="preview-item"><strong>Datasheet URL:</strong> <a href="${escapeHtml(resolvedData.datasheet_url)}" target="_blank">${escapeHtml(resolvedData.datasheet_url)}</a></div>`;
     }
-    if (toolData.title) {
-      html += `<div class="preview-item"><strong>Title:</strong> ${escapeHtml(toolData.title)}</div>`;
+    if (resolvedData.title) {
+      html += `<div class="preview-item"><strong>Title:</strong> ${escapeHtml(resolvedData.title)}</div>`;
     }
-    if (toolData.summary) {
-      html += `<div class="preview-item"><strong>Summary:</strong> ${escapeHtml(toolData.summary)}</div>`;
+    if (resolvedData.summary) {
+      html += `<div class="preview-item"><strong>Summary:</strong> ${escapeHtml(resolvedData.summary)}</div>`;
     }
     html += '</div>';
     html += '<details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre>`;
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre>`;
     html += '</details>';
-  } else if (toolName === 'parse' && typeof toolData === 'object') {
+  } else if (toolName === 'parse' && typeof resolvedData === 'object') {
     // Datasheet parse preview
     html += '<div class="tool-preview">';
-    if (toolData.specifications) {
+    if (resolvedData.specifications) {
       html += '<div class="preview-item"><strong>Specifications Found:</strong></div>';
       html += '<ul class="spec-list">';
-      for (const [key, value] of Object.entries(toolData.specifications)) {
+      for (const [key, value] of Object.entries(resolvedData.specifications)) {
         html += `<li><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</li>`;
       }
       html += '</ul>';
     }
     html += '</div>';
     html += '<details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre>`;
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre>`;
+    html += '</details>';
+  } else if (toolName === 'pin_counter' && typeof resolvedData === 'object') {
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    const renderImage = (label, path) => {
+      if (!path) return '';
+      const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+      const url = path.startsWith('http')
+        ? path
+        : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+      return `
+        <div class="preview-item">
+          <strong>${label}:</strong><br>
+          <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;">
+        </div>
+      `;
+    };
+    html += '<div class="tool-preview">';
+    html += `<div class="preview-item"><strong>Pins Detected (conf > 0.5):</strong> ${resolvedData.pins_detected ?? 'N/A'}</div>`;
+    html += `<div class="preview-item"><strong>Notches Detected (conf > 0.5):</strong> ${resolvedData.notches_detected ?? 'N/A'}</div>`;
+    html += renderImage('Pin Counter Visualization', resolvedData.visualization || resolvedData.overlay_path);
+    html += '</div>';
+    html += '<details class="json-details"><summary>View Full JSON</summary>';
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre>`;
     html += '</details>';
   } else {
     // Generic JSON display
-    if (typeof toolData === 'object') {
-      html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre>`;
+    if (typeof resolvedData === 'object') {
+      html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre>`;
     } else {
-      html += `<pre class="json-display">${escapeHtml(String(toolData))}</pre>`;
+      html += `<pre class="json-display">${escapeHtml(String(resolvedData))}</pre>`;
     }
   }
   
@@ -484,14 +548,14 @@ function renderOEMInfo(oemInfo, filePaths) {
  */
 function renderDimensionAnalysis(dimensionAnalysis, filePaths) {
   const dim = dimensionAnalysis || {};
-  const vizPath = filePaths.dimension_viz;
+  const vizPath = dim.dimension_visualization || filePaths.dimension_viz;
   
   return `
     <div class="tab-content-section">
       <h3>Dimension Analysis</h3>
       ${vizPath ? `
         <div class="image-viewer">
-          <img src="${API_BASE_URL}/api_results/${vizPath}" alt="Dimension Visualization">
+          <img src="${vizPath.startsWith('http') ? vizPath : `${API_BASE_URL}/api_results/${vizPath}`}" alt="SAM 2.1 Visualization">
         </div>
       ` : ''}
       <div class="detail-grid">
@@ -505,6 +569,18 @@ function renderDimensionAnalysis(dimensionAnalysis, filePaths) {
           <div class="detail-item">
             <label>Measured Aspect Ratio</label>
             <value>${dim.measured_aspect_ratio.toFixed(2)}</value>
+          </div>
+        ` : ''}
+        ${dim.mask_coverage !== undefined && dim.mask_coverage !== null ? `
+          <div class="detail-item">
+            <label>Mask Coverage</label>
+            <value>${(dim.mask_coverage * 100).toFixed(1)}%</value>
+          </div>
+        ` : ''}
+        ${dim.mask_area_px ? `
+          <div class="detail-item">
+            <label>Mask Area (px)</label>
+            <value>${dim.mask_area_px}</value>
           </div>
         ` : ''}
         ${dim.confidence_score !== undefined ? `
@@ -521,6 +597,202 @@ function renderDimensionAnalysis(dimensionAnalysis, filePaths) {
       ` : ''}
     </div>
   `;
+}
+
+/**
+ * Render Histogram Filter Analysis tab
+ */
+function renderHistogramAnalysis(histogramAnalysis, filePaths, visualComparison = null) {
+  if (!histogramAnalysis) {
+    return '<div class="tab-content-section"><p>No histogram analysis available</p></div>';
+  }
+  
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
+  const strips = histogramAnalysis.strip_paths || [];
+  const dashboardPath = histogramAnalysis.dashboard_path || filePaths.histogram_dashboard;
+  
+  const renderImage = (path, label) => {
+    if (!path) return '';
+    const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+    const url = path.startsWith('http')
+      ? path
+      : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+    return `
+      <div class="histogram-strip-item">
+        <h4>${escapeHtml(label)}</h4>
+        <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;cursor:pointer;" onclick="window.open('${url}', '_blank')">
+      </div>
+    `;
+  };
+  
+  let html = `
+    <div class="tab-content-section">
+      <h3>Histogram Filter Analysis</h3>
+      <p>11 image processing filters applied to enhance defect detection. Each strip shows: original, before filter, after filter, and histogram.</p>
+      
+      ${dashboardPath ? `
+        <div class="histogram-dashboard-section" style="margin-bottom: 30px;">
+          <h4>Complete Dashboard (All Filters)</h4>
+          <p style="color: var(--muted); font-size: 0.9em;">This dashboard shows all 11 filters in a single view for analysis.</p>
+          ${renderImage(dashboardPath, 'Histogram Filter Dashboard')}
+        </div>
+      ` : ''}
+      
+      <div class="histogram-strips-section">
+        <h4>Individual Filter Strips (For QA Review)</h4>
+        <p style="color: var(--muted); font-size: 0.9em;">Click any strip to view full size. Use CLAHE for surface texture, Edge Map for cracks, Threshold for contamination.</p>
+        <div class="histogram-strips-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-top: 20px;">
+  `;
+  
+  // Filter descriptions and what they detect
+  const filterInfo = {
+    '01_resize': { name: 'Resize', detects: 'Image preprocessing', verdict: 'N/A' },
+    '02_grayscale': { name: 'Grayscale', detects: 'Color normalization', verdict: 'N/A' },
+    '03_gamma': { name: 'Gamma Correction', detects: 'Dark epoxy regions', verdict: 'N/A' },
+    '04_hist_equalization': { name: 'Histogram Equalization', detects: 'Global contrast enhancement', verdict: 'N/A' },
+    '05_clahe': { name: 'CLAHE', detects: 'Surface texture defects', verdict: 'N/A' },
+    '06_gaussian_blur': { name: 'Gaussian Blur', detects: 'Noise smoothing for edge detection', verdict: 'N/A' },
+    '07_edge_map': { name: 'Edge Map', detects: 'Cracks and package boundaries', verdict: 'N/A' },
+    '08_color_jitter': { name: 'Color Jitter', detects: 'Illumination variations', verdict: 'N/A' },
+    '09_gaussian_noise': { name: 'Gaussian Noise', detects: 'Model robustness testing', verdict: 'N/A' },
+    '10_otsu_threshold': { name: 'Otsu Threshold', detects: 'Contamination and foreground defects', verdict: 'N/A' },
+    '11_normalize_tensor': { name: 'Normalize Tensor', detects: 'Model-ready preprocessing', verdict: 'N/A' }
+  };
+  
+  // Load analysis JSON to get statistics and determine verdicts
+  let analysisData = null;
+  if (histogramAnalysis.analysis_json_path) {
+    try {
+      // Try to fetch analysis JSON
+      const jsonPath = histogramAnalysis.analysis_json_path;
+      const cleanPath = jsonPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+      const jsonUrl = jsonPath.startsWith('http')
+        ? jsonPath
+        : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+      
+      // For now, we'll determine verdicts based on filter type and statistics if available
+      // This will be enhanced when we can fetch the JSON
+    } catch (e) {
+      console.warn('Could not load histogram analysis JSON:', e);
+    }
+  }
+  
+  // Function to determine verdict - prefer AI analysis verdicts, fallback to calculated
+  const getVerdict = (stepName, stats, aiVerdicts = null) => {
+    // First, try to use AI analysis verdict if available
+    if (aiVerdicts && aiVerdicts[stepName]) {
+      return aiVerdicts[stepName];
+    }
+    
+    // Fallback to calculated verdict based on statistics
+    if (!stats) return 'N/A';
+    
+    switch(stepName) {
+      case '05_clahe': // CLAHE - check entropy and contrast
+        const entropy = stats.entropy || 0;
+        const contrast = stats.contrast || 0;
+        return (entropy > 4.0 && contrast > 150) ? 'Yes' : 'No';
+      
+      case '07_edge_map': // Edge Map - check skewness (edge concentration)
+        const skewness = Math.abs(stats.skewness || 0);
+        return skewness > 5.0 ? 'Yes' : 'No';
+      
+      case '10_otsu_threshold': // Otsu - check contrast and dynamic range
+        const otsuContrast = stats.contrast || 0;
+        const dynamicRange = stats.dynamic_range || 0;
+        return (otsuContrast > 200 && dynamicRange > 0.5) ? 'Yes' : 'No';
+      
+      case '06_gaussian_blur': // Blur - should have lower entropy (smoothing)
+        const blurEntropy = stats.entropy || 0;
+        return blurEntropy < 6.0 ? 'Yes' : 'No';
+      
+      default:
+        return 'N/A';
+    }
+  };
+  
+  // Get AI analysis histogram filter verdicts if available
+  const aiVerdicts = visualComparison?.histogram_filter_verdicts || null;
+  const aiReasoning = visualComparison?.histogram_filter_reasoning || null;
+  
+  strips.forEach((stripPath, idx) => {
+    const stepName = stripPath.split('/').pop().replace('_strip.png', '');
+    const info = filterInfo[stepName] || { 
+      name: stepName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      detects: 'Image processing filter',
+      verdict: 'N/A'
+    };
+    
+    // Use AI analysis verdict if available, otherwise use default
+    const initialVerdict = aiVerdicts && aiVerdicts[stepName] ? aiVerdicts[stepName] : info.verdict;
+    let oneLiner = `${info.name}: ${info.detects} - Verdict: ${initialVerdict}`;
+    // Add AI analysis reasoning if available
+    if (aiReasoning && aiReasoning[stepName]) {
+      oneLiner += ` (${aiReasoning[stepName]})`;
+    }
+    
+    html += renderImage(stripPath, oneLiner);
+  });
+  
+  html += `
+        </div>
+      </div>
+      
+      ${histogramAnalysis.analysis_json_path ? `
+        <details class="json-details" style="margin-top: 30px;">
+          <summary>View Histogram Statistics JSON</summary>
+          <pre class="json-display" id="histogramStatsJson">Loading...</pre>
+        </details>
+      ` : ''}
+    </div>
+  `;
+  
+  // Load JSON stats if available and update verdicts
+  if (histogramAnalysis.analysis_json_path) {
+    const jsonPath = histogramAnalysis.analysis_json_path;
+    const cleanPath = jsonPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+    const jsonUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+    
+    fetch(jsonUrl)
+      .then(res => res.json())
+      .then(data => {
+        // Update JSON display
+        const jsonEl = document.getElementById('histogramStatsJson');
+        if (jsonEl) {
+          jsonEl.textContent = JSON.stringify(data, null, 2);
+        }
+        
+        // Update verdicts in displayed strips
+        const stripItems = document.querySelectorAll('.histogram-strip-item');
+        stripItems.forEach(item => {
+          const img = item.querySelector('img');
+          if (img && img.src) {
+            const stepName = img.src.split('/').pop().replace('_strip.png', '');
+            const info = filterInfo[stepName];
+            if (info && data.filters && data.filters[stepName]) {
+              const stats = data.filters[stepName].statistics;
+              const verdict = getVerdict(stepName, stats, aiVerdicts);
+              let oneLiner = `${info.name}: ${info.detects} - Verdict: ${verdict}`;
+              // Add AI analysis reasoning if available
+              if (aiReasoning && aiReasoning[stepName]) {
+                oneLiner += ` (${aiReasoning[stepName]})`;
+              }
+              const h4 = item.querySelector('h4');
+              if (h4) h4.textContent = oneLiner;
+              if (img) img.alt = oneLiner;
+            }
+          }
+        });
+      })
+      .catch(err => {
+        const jsonEl = document.getElementById('histogramStatsJson');
+        if (jsonEl) {
+          jsonEl.textContent = `Error loading JSON: ${err.message}`;
+        }
+      });
+  }
+  
+  return html;
 }
 
 /**

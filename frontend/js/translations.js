@@ -57,7 +57,7 @@ const translations = {
     'login.business.signup': "Don't have an account?",
     'login.business.signupLink': 'Sign up',
     'dashboard.welcome': 'Hello, Priya',
-    'dashboard.pending': 'You have <strong>3</strong> pending verifications today. Keep your supply chain safe.',
+    'dashboard.pending': 'You have <strong id="pendingCount">0</strong> pending verifications today. Keep your supply chain safe.',
     'dashboard.performance': 'Performance overview',
     'dashboard.autoDetect': 'Auto-detect accuracy',
     'dashboard.manualVerify': 'Manual verification rate',

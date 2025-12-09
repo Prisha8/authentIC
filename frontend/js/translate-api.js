@@ -81,7 +81,33 @@ async function translatePage(lang = 'en') {
     if (translation) {
       const tagName = element.tagName.toUpperCase();
       if (tagName === 'P' || tagName === 'DIV' || tagName === 'H1' || tagName === 'H2' || tagName === 'H3' || tagName === 'H4' || tagName === 'H5' || tagName === 'H6' || tagName === 'LI') {
+        // Preserve pendingCount ID when translating
+        const pendingCountEl = element.querySelector('#pendingCount');
+        const pendingCount = pendingCountEl ? pendingCountEl.textContent : '0';
+        
         element.innerHTML = translation;
+        
+        // Restore pendingCount ID if it was present and translation doesn't have it
+        if (pendingCountEl && !element.querySelector('#pendingCount')) {
+          const strongTags = element.querySelectorAll('strong');
+          if (strongTags.length > 0) {
+            // Use the first strong tag or the one that contains a number
+            let targetStrong = null;
+            for (const strong of strongTags) {
+              if (strong.textContent.match(/\d+/)) {
+                targetStrong = strong;
+                break;
+              }
+            }
+            if (!targetStrong && strongTags.length > 0) {
+              targetStrong = strongTags[0];
+            }
+            if (targetStrong) {
+              targetStrong.id = 'pendingCount';
+              targetStrong.textContent = pendingCount;
+            }
+          }
+        }
       } else if (tagName === 'BUTTON' || tagName === 'A') {
         const hasChildren = element.children.length > 0;
         if (hasChildren) {
@@ -161,4 +187,14 @@ if (document.readyState === 'loading') {
 } else {
   initTranslation();
 }
+
+// Export function to update pending count after translations
+window.updatePendingCountAfterTranslation = function(count) {
+  setTimeout(() => {
+    const pendingCountEl = document.getElementById('pendingCount');
+    if (pendingCountEl) {
+      pendingCountEl.textContent = count;
+    }
+  }, 100);
+};
 

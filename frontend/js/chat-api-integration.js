@@ -650,7 +650,9 @@ function buildDownloadUrl(filePath) {
         time: Date.now(),
         _processChain: true,
         _sessionId: null,
-        _steps: {}
+        _steps: {},
+        _showProcessChain: true, // keep chain visible by default
+        _collapsed: false
       };
       chat.messages.push(processChainMsg);
       saveMessagesToStorage(chat.messages);
@@ -766,8 +768,11 @@ function buildDownloadUrl(filePath) {
         // For completed process chains, check if they should be shown or hidden
         // (controlled by toggle state - default hidden, shown when arrow is clicked)
         if (msg._processChain && msg._completed) {
-          // Show if explicitly marked to show, otherwise hide (summary replaces it)
-          return msg._showProcessChain === true;
+          // Default to visible unless explicitly hidden
+          if (typeof msg._showProcessChain === 'undefined') {
+            msg._showProcessChain = true;
+          }
+          return msg._showProcessChain !== false;
         }
         return true;
       });
@@ -807,6 +812,12 @@ function buildDownloadUrl(filePath) {
         
         // Handle process chain - Show vertical chain of thought with animations
         if (msg._processChain) {
+          // Default to showing the chain when completed unless user collapsed it
+          if (msg._completed && typeof msg._showProcessChain === 'undefined') {
+            msg._showProcessChain = true;
+          }
+          const isCollapsed = msg._collapsed === true;
+          
           const chainContainer = document.createElement('div');
           chainContainer.className = 'process-chain';
           chainContainer.dataset.chainTime = msg.time; // Store time for navigation
@@ -815,6 +826,9 @@ function buildDownloadUrl(filePath) {
           if (msg._completed) {
             const toggleBtn = document.createElement('button');
             toggleBtn.className = 'process-chain-toggle';
+            if (isCollapsed) {
+              toggleBtn.classList.add('collapsed');
+            }
             toggleBtn.innerHTML = `
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="6 9 12 15 18 9"></polyline>
@@ -824,6 +838,7 @@ function buildDownloadUrl(filePath) {
             toggleBtn.onclick = () => {
               chainContainer.classList.toggle('collapsed');
               toggleBtn.classList.toggle('collapsed');
+              msg._collapsed = chainContainer.classList.contains('collapsed');
             };
             chainContainer.appendChild(toggleBtn);
           }
@@ -831,19 +846,20 @@ function buildDownloadUrl(filePath) {
           const chainContent = document.createElement('div');
           chainContent.className = 'process-chain-content';
           
-          const stepOrder = ['identify', 'scrape', 'parse', 'dimension', 'visual', 'verdict', 'report'];
+          const stepOrder = ['identify', 'scrape', 'parse', 'pin_counter', 'dimension', 'visual', 'verdict', 'report'];
           const stepTitles = {
             'identify': 'Identifying IC from image',
             'scrape': 'Searching for OEM datasheet',
             'parse': 'Parsing datasheet and extracting diagrams',
+            'pin_counter': 'Counting pins with YOLO',
             'dimension': 'Estimating dimensions using computer vision',
             'visual': 'Performing visual analysis',
             'verdict': 'Computing final verdict',
             'report': 'Generating detailed report'
           };
           
-          // If completed, start collapsed
-          if (msg._completed) {
+          // If completed, respect stored collapsed state (default open)
+          if (msg._completed && isCollapsed) {
             chainContainer.classList.add('collapsed');
           }
           
@@ -1436,6 +1452,122 @@ function buildDownloadUrl(filePath) {
         const outputDiv = document.createElement('div');
         outputDiv.className = 'step-preview-section';
         outputDiv.innerHTML = `<strong>Output:</strong>`;
+
+        const userType = localStorage.getItem('authentIC_userType') || 'business';
+        const renderImage = (label, path) => {
+          if (!path) return null;
+          const container = document.createElement('div');
+          container.style.marginTop = '10px';
+          container.innerHTML = `<strong style="display:block;margin-bottom:6px;">${label}</strong>`;
+          const img = document.createElement('img');
+          const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+          img.src = path.startsWith('http')
+            ? path
+            : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+          img.style.maxWidth = '100%';
+          img.style.height = 'auto';
+          img.style.borderRadius = '6px';
+          img.style.border = '1px solid var(--border)';
+          container.appendChild(img);
+          return container;
+        };
+
+        if (stepKey === 'pin_counter') {
+          const summary = document.createElement('div');
+          summary.style.marginTop = '10px';
+          const classificationStats = stepOutput.classification_stats || {};
+          summary.innerHTML = `
+            <p><strong>Pins Detected (conf > 0.5):</strong> ${stepOutput.pins_detected ?? 'N/A'}</p>
+            <p><strong>Notches Detected (conf > 0.5):</strong> ${stepOutput.notches_detected ?? 'N/A'}</p>
+            <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+              <p style="margin: 4px 0;"><strong>Classification:</strong></p>
+              <p style="margin: 4px 0; color: #22c55e;"><strong>Authentic (conf ≥ 0.8):</strong> ${classificationStats.authentic || 0}</p>
+              <p style="margin: 4px 0; color: #f59e0b;"><strong>Suspicious (0.5 ≤ conf < 0.8):</strong> ${classificationStats.suspicious || 0}</p>
+              <p style="margin: 4px 0; color: #ef4444;"><strong>Counterfeit (conf < 0.5):</strong> ${classificationStats.counterfeit || 0} (filtered out)</p>
+            </div>
+          `;
+          outputDiv.appendChild(summary);
+
+          const block = renderImage('Pin Counter Visualization', step.visualization || stepOutput.visualization || stepOutput.overlay_path);
+          if (block) outputDiv.appendChild(block);
+        }
+        
+        // Special handling for preprocess step - show only OCR visualization, no raw data table
+        if (stepKey === 'preprocess') {
+          // Show OCR visualization if available
+          const ocrViz = step.visualization || stepOutput.ocr_visualization_url || stepOutput.ocr_visualization_path;
+          if (ocrViz) {
+            const ocrBlock = renderImage('OCR Text Detection Visualization', ocrViz);
+            if (ocrBlock) {
+              outputDiv.appendChild(ocrBlock);
+            }
+          }
+        }
+        
+        // Special handling for histogram_filter step - show dashboard and all strips
+        if (stepKey === 'histogram_filter') {
+          const histData = stepOutput.data || stepOutput;
+          const dashboardPath = histData.dashboard_url || histData.dashboard_path || step.visualization;
+          const stripPaths = histData.strip_urls || histData.strip_paths || [];
+          
+          // Show dashboard
+          if (dashboardPath) {
+            const dashboardBlock = renderImage('Histogram Filter Dashboard (All 11 Filters)', dashboardPath);
+            if (dashboardBlock) {
+              const dashboardInfo = document.createElement('p');
+              dashboardInfo.style.marginTop = '8px';
+              dashboardInfo.style.color = '#666';
+              dashboardInfo.style.fontSize = '0.9em';
+              dashboardInfo.textContent = 'This dashboard combines all 11 filter outputs in a single view for analysis.';
+              dashboardBlock.appendChild(dashboardInfo);
+              outputDiv.appendChild(dashboardBlock);
+            }
+          }
+          
+          // Show individual strips
+          if (stripPaths && stripPaths.length > 0) {
+            const stripsSection = document.createElement('div');
+            stripsSection.style.marginTop = '20px';
+            stripsSection.innerHTML = '<strong style="display:block;margin-bottom:12px;">Individual Filter Strips (For QA Review):</strong>';
+            
+            const stepLabels = {
+              '01_resize': '1. Resize',
+              '02_grayscale': '2. Grayscale',
+              '03_gamma': '3. Gamma Correction',
+              '04_hist_equalization': '4. Histogram Equalization',
+              '05_clahe': '5. CLAHE (Surface Texture)',
+              '06_gaussian_blur': '6. Gaussian Blur',
+              '07_edge_map': '7. Edge Map (Cracks/Damage)',
+              '08_color_jitter': '8. Color Jitter',
+              '09_gaussian_noise': '9. Gaussian Noise',
+              '10_otsu_threshold': '10. Otsu Threshold (Contamination)',
+              '11_normalize_tensor': '11. Normalize Tensor'
+            };
+            
+            const stripsContainer = document.createElement('div');
+            stripsContainer.style.display = 'grid';
+            stripsContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(350px, 1fr))';
+            stripsContainer.style.gap = '15px';
+            stripsContainer.style.maxHeight = '600px';
+            stripsContainer.style.overflowY = 'auto';
+            stripsContainer.style.padding = '10px';
+            stripsContainer.style.border = '1px solid var(--border)';
+            stripsContainer.style.borderRadius = '6px';
+            
+            stripPaths.forEach(stripPath => {
+              const stepName = stripPath.split('/').pop().replace('_strip.png', '');
+              const label = stepLabels[stepName] || stepName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const stripBlock = renderImage(label, stripPath);
+              if (stripBlock) {
+                stripBlock.style.marginTop = '0';
+                stripsContainer.appendChild(stripBlock);
+              }
+            });
+            
+            stripsSection.appendChild(stripsContainer);
+            outputDiv.appendChild(stripsSection);
+          }
+        }
         
         // Special handling for identify step - show decoded markings as tables
         if (stepKey === 'identify' && stepOutput.date_codes && Array.isArray(stepOutput.date_codes) && stepOutput.date_codes.length > 0) {
@@ -1515,7 +1647,7 @@ function buildDownloadUrl(filePath) {
           outputDiv.appendChild(markingsDiv);
         }
         
-        // Handle dimension step - show brief summary and visualization
+        // Handle dimension step - show brief summary and SAM 2.1 visualization
         if (stepKey === 'dimension' && stepOutput && Object.keys(stepOutput).length > 0) {
           const summaryDiv = document.createElement('div');
           summaryDiv.style.marginTop = '12px';
@@ -1530,17 +1662,21 @@ function buildDownloadUrl(filePath) {
             if (stepOutput.verdict) {
               summaryDiv.innerHTML += `<p><strong>Verdict:</strong> ${stepOutput.verdict}</p>`;
             }
+            if (stepOutput.mask_coverage !== undefined && stepOutput.mask_coverage !== null) {
+              summaryDiv.innerHTML += `<p><strong>Mask Coverage:</strong> ${(stepOutput.mask_coverage * 100).toFixed(1)}%</p>`;
+            }
           }
           outputDiv.appendChild(summaryDiv);
           
           // Show visualization if available in step.visualization
-          if (step.visualization) {
+          const samViz = step.sam_visualization || step.visualization || stepOutput.sam_visualization || stepOutput.visualization;
+          if (samViz) {
             const vizDiv = document.createElement('div');
             vizDiv.style.marginTop = '12px';
-            vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Dimension Visualization:</strong>';
+            vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">SAM 2.1 Visualization:</strong>';
             const img = document.createElement('img');
             let imgUrl;
-            const vizPath = step.visualization;
+            const vizPath = samViz;
             if (vizPath.startsWith('http')) {
               imgUrl = vizPath;
             } else {
@@ -1812,8 +1948,346 @@ function buildDownloadUrl(filePath) {
             countryDiv.innerHTML = `<strong style="display:block;margin-bottom:8px;">Country Codes:</strong><p>${stepOutput.country_codes.join(', ')}</p>`;
             outputDiv.appendChild(countryDiv);
           }
-        } else if (stepKey !== 'parse' && stepKey !== 'dimension' && stepKey !== 'identify' && stepOutput && Object.keys(stepOutput).length > 0) {
-          // For other steps (not dimension, not parse), try to render as table if it's an object/array
+        } else if (stepKey === 'visual' && stepOutput) {
+          // Special handling for visual step - show anomalies count and list
+          if (stepOutput.anomalies_count !== undefined) {
+            const anomaliesCountDiv = document.createElement('div');
+            anomaliesCountDiv.style.marginTop = '12px';
+            anomaliesCountDiv.style.marginBottom = '12px';
+            anomaliesCountDiv.innerHTML = `<strong style="display:block;margin-bottom:8px;">Anomalies Detected: ${stepOutput.anomalies_count}</strong>`;
+            outputDiv.appendChild(anomaliesCountDiv);
+          }
+          
+          // List all anomalies
+          const anomalies = stepOutput.anomalies || (stepOutput.visual_comparison && stepOutput.visual_comparison.anomalies) || [];
+          if (anomalies.length > 0) {
+            const anomaliesDiv = document.createElement('div');
+            anomaliesDiv.style.marginTop = '12px';
+            anomaliesDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Anomalies List:</strong>';
+            
+            const anomaliesList = document.createElement('div');
+            anomaliesList.style.display = 'flex';
+            anomaliesList.style.flexDirection = 'column';
+            anomaliesList.style.gap = '8px';
+            
+            anomalies.forEach((anomaly, idx) => {
+              const anomalyCard = document.createElement('div');
+              anomalyCard.style.padding = '10px';
+              anomalyCard.style.border = '1px solid var(--border)';
+              anomalyCard.style.borderRadius = '6px';
+              anomalyCard.style.backgroundColor = 'var(--bg-secondary, #f9fafb)';
+              
+              const severity = anomaly.severity || 'medium';
+              const severityColors = {
+                'high': '#ef4444',
+                'medium': '#f59e0b',
+                'low': '#eab308'
+              };
+              anomalyCard.style.borderLeft = `4px solid ${severityColors[severity] || severityColors.medium}`;
+              
+              const header = document.createElement('div');
+              header.style.display = 'flex';
+              header.style.justifyContent = 'space-between';
+              header.style.alignItems = 'center';
+              header.style.marginBottom = '6px';
+              
+              const typeSpan = document.createElement('span');
+              typeSpan.style.fontWeight = '600';
+              typeSpan.textContent = `#${idx + 1}: ${(anomaly.type || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
+              header.appendChild(typeSpan);
+              
+              const severityBadge = document.createElement('span');
+              severityBadge.style.padding = '2px 8px';
+              severityBadge.style.borderRadius = '4px';
+              severityBadge.style.fontSize = '0.85em';
+              severityBadge.style.fontWeight = '600';
+              severityBadge.style.textTransform = 'uppercase';
+              severityBadge.style.backgroundColor = severityColors[severity] || severityColors.medium;
+              severityBadge.style.color = 'white';
+              severityBadge.textContent = severity;
+              header.appendChild(severityBadge);
+              
+              anomalyCard.appendChild(header);
+              
+              const desc = document.createElement('p');
+              desc.style.margin = '0';
+              desc.style.color = 'var(--text-secondary, #6b7280)';
+              desc.style.fontSize = '0.9em';
+              desc.textContent = anomaly.description || 'No description available';
+              anomalyCard.appendChild(desc);
+              
+              anomaliesList.appendChild(anomalyCard);
+            });
+            
+            anomaliesDiv.appendChild(anomaliesList);
+            outputDiv.appendChild(anomaliesDiv);
+          } else if (stepOutput.anomalies_count === 0) {
+            const noAnomaliesDiv = document.createElement('div');
+            noAnomaliesDiv.style.marginTop = '12px';
+            noAnomaliesDiv.style.padding = '10px';
+            noAnomaliesDiv.style.borderRadius = '6px';
+            noAnomaliesDiv.style.backgroundColor = '#d1fae5';
+            noAnomaliesDiv.style.color = '#065f46';
+            noAnomaliesDiv.innerHTML = '<strong>✓ No anomalies detected</strong>';
+            outputDiv.appendChild(noAnomaliesDiv);
+          }
+          
+          // Show attribute scores if available
+          const attributeScores = stepOutput.visual_comparison?.attribute_scores || stepOutput.attribute_scores || {};
+          if (Object.keys(attributeScores).length > 0) {
+            const scoresDiv = document.createElement('div');
+            scoresDiv.style.marginTop = '12px';
+            scoresDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Visual Attribute Scores:</strong>';
+            
+            const scoresTable = document.createElement('table');
+            scoresTable.className = 'json-table';
+            scoresTable.style.width = '100%';
+            scoresTable.style.marginTop = '8px';
+            
+            const thead = document.createElement('thead');
+            thead.innerHTML = '<tr><th>Attribute</th><th>Score</th><th>Weight</th></tr>';
+            scoresTable.appendChild(thead);
+            
+            const tbody = document.createElement('tbody');
+            
+            const attributeLabels = {
+              'pin_count_match': 'Pin Count Match',
+              'text_quality': 'Text Quality',
+              'notch_pin_mapping': 'Notch/Pin Mapping',
+              'surface_uniformity': 'Surface Uniformity',
+              'package_type_match': 'Package Type Match',
+              'pin_pitch_match': 'Pin Pitch Match',
+              'marking_placement': 'Marking Placement',
+              'overall_visual_assessment': 'Overall Visual Assessment'
+            };
+            
+            const attributeWeights = {
+              'pin_count_match': '10%',
+              'text_quality': '10%',
+              'notch_pin_mapping': '8%',
+              'surface_uniformity': '8%',
+              'package_type_match': '7%',
+              'pin_pitch_match': '4%',
+              'marking_placement': '3%',
+              'overall_visual_assessment': 'N/A'
+            };
+            
+            // Sort attributes by weight (descending)
+            const sortedAttrs = Object.keys(attributeScores).sort((a, b) => {
+              const weightA = parseFloat(attributeWeights[a] || '0') || 0;
+              const weightB = parseFloat(attributeWeights[b] || '0') || 0;
+              return weightB - weightA;
+            });
+            
+            sortedAttrs.forEach(attr => {
+              const score = attributeScores[attr];
+              if (score !== null && score !== undefined) {
+                const row = document.createElement('tr');
+                
+                const labelCell = document.createElement('td');
+                labelCell.style.fontWeight = '600';
+                labelCell.textContent = attributeLabels[attr] || attr.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                row.appendChild(labelCell);
+                
+                const scoreCell = document.createElement('td');
+                const scoreValue = parseFloat(score);
+                scoreCell.textContent = `${scoreValue.toFixed(1)}/100`;
+                
+                // Color code based on score
+                if (scoreValue >= 80) {
+                  scoreCell.style.color = '#10b981'; // green
+                } else if (scoreValue >= 60) {
+                  scoreCell.style.color = '#f59e0b'; // yellow
+                } else {
+                  scoreCell.style.color = '#ef4444'; // red
+                }
+                scoreCell.style.fontWeight = '600';
+                row.appendChild(scoreCell);
+                
+                const weightCell = document.createElement('td');
+                weightCell.textContent = attributeWeights[attr] || '-';
+                weightCell.style.color = 'var(--text-secondary, #6b7280)';
+                row.appendChild(weightCell);
+                
+                tbody.appendChild(row);
+              }
+            });
+            
+            scoresTable.appendChild(tbody);
+            scoresDiv.appendChild(scoresTable);
+            outputDiv.appendChild(scoresDiv);
+          }
+          
+          // Show observations if available
+          const observations = stepOutput.visual_comparison?.observations || [];
+          if (observations.length > 0) {
+            const obsDiv = document.createElement('div');
+            obsDiv.style.marginTop = '12px';
+            obsDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Observations:</strong>';
+            const obsList = document.createElement('ul');
+            obsList.style.margin = '0';
+            obsList.style.paddingLeft = '20px';
+            observations.forEach(obs => {
+              const li = document.createElement('li');
+              li.style.marginBottom = '4px';
+              li.textContent = obs;
+              obsList.appendChild(li);
+            });
+            obsDiv.appendChild(obsList);
+            outputDiv.appendChild(obsDiv);
+          }
+          
+          // Add annotation button for visual step
+          if (sessionId) {
+            const annotateDiv = document.createElement('div');
+            annotateDiv.style.marginTop = '16px';
+            annotateDiv.style.paddingTop = '16px';
+            annotateDiv.style.borderTop = '1px solid var(--border)';
+            
+            const annotateBtn = document.createElement('button');
+            annotateBtn.className = 'annotation-toggle-btn';
+            annotateBtn.textContent = '📝 Annotate Image';
+            annotateBtn.onclick = () => {
+              // Find the primary IC image in the modal
+              const modal = annotateBtn.closest('.step-preview-modal');
+              const img = modal?.querySelector('img[src*="api/download"]') || modal?.querySelector('img');
+              
+              if (!img) {
+                alert('Image not found. Please ensure the IC image is displayed.');
+                return;
+              }
+              
+              // Initialize annotation tool
+              if (!window.currentAnnotationTool) {
+                const imgContainer = img.parentElement;
+                if (!imgContainer) {
+                  alert('Could not find image container');
+                  return;
+                }
+                
+                // Create container ID if it doesn't exist
+                if (!imgContainer.id) {
+                  imgContainer.id = 'annotation-container-' + Date.now();
+                }
+                
+                window.currentAnnotationTool = new AnnotationTool(img, imgContainer.id);
+              }
+              
+              // Toggle annotation mode
+              if (window.currentAnnotationTool.enabled) {
+                window.currentAnnotationTool.disable();
+                annotateBtn.textContent = '📝 Annotate Image';
+                annotateBtn.classList.remove('active');
+              } else {
+                window.currentAnnotationTool.enable();
+                window.currentAnnotationTool.loadAnnotations(sessionId, img.src);
+                annotateBtn.textContent = '✓ Stop Annotating';
+                annotateBtn.classList.add('active');
+              }
+            };
+            
+            annotateDiv.appendChild(annotateBtn);
+            outputDiv.appendChild(annotateDiv);
+          }
+        } else if (stepKey === 'verdict' && stepOutput) {
+          // Special handling for verdict step - show weighted scores breakdown
+          if (stepOutput.weighted_scores_breakdown) {
+            const scoresDiv = document.createElement('div');
+            scoresDiv.style.marginTop = '12px';
+            scoresDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Weighted Scores Breakdown:</strong>';
+            
+            const scoresTable = document.createElement('table');
+            scoresTable.className = 'json-table';
+            scoresTable.style.width = '100%';
+            scoresTable.style.marginTop = '8px';
+            
+            const thead = document.createElement('thead');
+            thead.innerHTML = '<tr><th>Tool</th><th>Score</th><th>Weight</th><th>Weighted Contribution</th></tr>';
+            scoresTable.appendChild(thead);
+            
+            const tbody = document.createElement('tbody');
+            const breakdown = stepOutput.weighted_scores_breakdown;
+            
+            if (breakdown.dimension_analysis) {
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td>${breakdown.dimension_analysis.tool || 'SAM 2.1 Dimension Estimator'}</td>
+                <td>${breakdown.dimension_analysis.score.toFixed(1)}/100</td>
+                <td>${(breakdown.dimension_analysis.weight * 100).toFixed(0)}%</td>
+                <td>${breakdown.dimension_analysis.weighted_contribution.toFixed(1)}</td>
+              `;
+              tbody.appendChild(row);
+            }
+            
+            if (breakdown.visual_analysis) {
+              // Overall visual analysis row
+              const visualRow = document.createElement('tr');
+              visualRow.innerHTML = `
+                <td><strong>Visual Analysis (Overall)</strong></td>
+                <td><strong>${breakdown.visual_analysis.overall_score.toFixed(1)}/100</strong></td>
+                <td><strong>${(breakdown.visual_analysis.weight * 100).toFixed(0)}%</strong></td>
+                <td><strong>${breakdown.visual_analysis.weighted_contribution.toFixed(1)}</strong></td>
+              `;
+              tbody.appendChild(visualRow);
+              
+              // Individual attribute breakdown (if available)
+              if (breakdown.visual_analysis.attribute_breakdown) {
+                const attrBreakdown = breakdown.visual_analysis.attribute_breakdown;
+                const attrLabels = {
+                  'pin_count_match': '  └ Pin Count Match',
+                  'text_quality': '  └ Text Quality',
+                  'notch_pin_mapping': '  └ Notch/Pin Mapping',
+                  'surface_uniformity': '  └ Surface Uniformity',
+                  'package_type_match': '  └ Package Type Match',
+                  'pin_pitch_match': '  └ Pin Pitch Match',
+                  'marking_placement': '  └ Marking Placement'
+                };
+                
+                Object.keys(attrBreakdown).forEach(attr => {
+                  const attrData = attrBreakdown[attr];
+                  const attrRow = document.createElement('tr');
+                  attrRow.style.color = 'var(--text-secondary, #6b7280)';
+                  attrRow.style.fontSize = '0.9em';
+                  attrRow.innerHTML = `
+                    <td>${attrLabels[attr] || `  └ ${attr.replace(/_/g, ' ')}`}</td>
+                    <td>${attrData.score.toFixed(1)}/100</td>
+                    <td>${(attrData.weight * 100).toFixed(0)}%</td>
+                    <td>${attrData.weighted_contribution.toFixed(1)}</td>
+                  `;
+                  tbody.appendChild(attrRow);
+                });
+              }
+            }
+            
+            if (breakdown.anomaly_penalty) {
+              const row = document.createElement('tr');
+              row.style.color = '#ef4444';
+              row.innerHTML = `
+                <td>${breakdown.anomaly_penalty.tool}</td>
+                <td>-${breakdown.anomaly_penalty.penalty.toFixed(1)}</td>
+                <td>-</td>
+                <td>-${breakdown.anomaly_penalty.penalty.toFixed(1)} (${breakdown.anomaly_penalty.anomaly_count} anomalies, ${breakdown.anomaly_penalty.high_severity_count} high)</td>
+              `;
+              tbody.appendChild(row);
+            }
+            
+            const finalRow = document.createElement('tr');
+            finalRow.style.fontWeight = 'bold';
+            finalRow.style.borderTop = '2px solid var(--border)';
+            finalRow.innerHTML = `
+              <td><strong>Final Score</strong></td>
+              <td><strong>${breakdown.final_score.toFixed(1)}/100</strong></td>
+              <td>-</td>
+              <td><strong>Base: ${breakdown.base_score.toFixed(1)} - Penalty: ${breakdown.anomaly_penalty?.penalty.toFixed(1) || 0}</strong></td>
+            `;
+            tbody.appendChild(finalRow);
+            
+            scoresTable.appendChild(tbody);
+            scoresDiv.appendChild(scoresTable);
+            outputDiv.appendChild(scoresDiv);
+          }
+        } else if (stepKey !== 'parse' && stepKey !== 'dimension' && stepKey !== 'identify' && stepKey !== 'preprocess' && stepKey !== 'histogram_filter' && stepKey !== 'pin_counter' && stepKey !== 'visual' && stepKey !== 'verdict' && stepOutput && Object.keys(stepOutput).length > 0) {
+          // For other steps (not dimension, not parse, not preprocess, not histogram_filter, not pin_counter, not visual, not verdict), try to render as table if it's an object/array
           const outputTable = renderJSONAsTable(stepOutput);
           if (outputTable) {
             outputDiv.appendChild(outputTable);
@@ -1920,7 +2394,13 @@ function buildDownloadUrl(filePath) {
           // Mark process chain as completed (don't remove it)
           if (processChainMsg) {
             processChainMsg._completed = true;
-            processChainMsg._collapsed = true; // Start collapsed
+            // Preserve user choice; default to expanded on completion
+            if (typeof processChainMsg._collapsed === 'undefined') {
+              processChainMsg._collapsed = false;
+            }
+            if (typeof processChainMsg._showProcessChain === 'undefined') {
+              processChainMsg._showProcessChain = true;
+            }
           }
           
           // Remove any existing summaries for this session to prevent duplicates

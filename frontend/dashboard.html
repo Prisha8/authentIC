@@ -305,11 +305,18 @@
               <div class="kpi-item">
                 <svg viewBox="0 0 36 36" class="circular-chart">
                   <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
-                  <path class="circle" id="kpi-confidence" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
-                  <text x="18" y="20.35" class="chart-text" id="kpi-confidence-text">0%</text>
+                  <path class="circle" id="kpi-dimension" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <text x="18" y="20.35" class="chart-text" id="kpi-dimension-text">0%</text>
                 </svg>
-                <div class="kpi-label">Confidence</div>
+                <div class="kpi-label">Dimension Match</div>
               </div>
+            </div>
+
+            <!-- Bell Curve Chart Section -->
+            <div class="metrics-chart-section">
+              <h4>Verdict Distribution</h4>
+              <p>Distribution of ICs across authenticity scores. Red (0-40): Counterfeit, Orange (40-70): Suspicious, Green (70-100): Authentic</p>
+              <canvas id="verdictBellCurveChart"></canvas>
             </div>
 
             <!-- Performance Bars Section -->
@@ -391,6 +398,13 @@
                         </button>
                         <button type="button" id="removeAnalysePdfBtn" class="remove-file-btn" style="display: none;" onclick="removeAnalysePdf()">Remove</button>
                       </div>
+                    </div>
+
+                    <div class="form-section">
+                      <label for="pcbAnalysisCheckbox" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" id="pcbAnalysisCheckbox" style="width: 18px; height: 18px;">
+                        <span>Analyse FPGA/PCB boards</span>
+                      </label>
                     </div>
                     
                     <div class="form-actions">
@@ -504,9 +518,14 @@
       </div>
       <div class="suspicious-modal-body">
         <div class="suspicious-modal-date"></div>
+        <div style="margin-bottom: 12px;">
+          <button class="annotation-toggle-btn" id="suspiciousModalAnnotateBtn" onclick="toggleSuspiciousModalAnnotation()">
+            📝 Annotate Image
+          </button>
+        </div>
         <div class="suspicious-modal-main">
-          <div class="suspicious-modal-image">
-            <img src="" alt="IC Image" />
+          <div class="suspicious-modal-image" id="suspiciousModalImageContainer">
+            <img src="" alt="IC Image" id="suspiciousModalImage" />
           </div>
           <div class="suspicious-modal-pdf">
             <iframe src="" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
@@ -658,6 +677,8 @@
     </div>
   </div>
 
+  <!-- Chart.js for bell curve visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <!-- Supabase Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Supabase Config -->
@@ -721,6 +742,7 @@
   </script>
   <!-- Dashboard Query Functionality -->
   <!-- Load dashboard-query.js FIRST to define switchView early -->
+  <script src="js/annotation-tool.js"></script>
   <script src="js/dashboard-query.js"></script>
   <script src="js/dashboard.js"></script>
   <script>

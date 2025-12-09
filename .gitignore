@@ -44,3 +44,7 @@ frontend/test-api.html
 data/
 SETUP_VECTOR_DB.md
 requirements.txt
+# Large local model weights (skip in git)
+backend/tools/pipeline\ 2/sam2.1_b.pt
+backend/weights/sam2.1_b.pt
+weights/sam2.1_b.pt

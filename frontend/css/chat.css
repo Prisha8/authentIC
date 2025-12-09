@@ -30,7 +30,14 @@
 *{box-sizing:border-box}
 body,html{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;background:var(--bg);color:var(--text);transition:background 0.2s, color 0.2s;}
 body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
-.app-shell{display:flex;height:100vh;overflow:hidden}
+/* Shared shell for pages with the fixed top nav (query + dashboard) */
+.app-shell{
+  display:flex;
+  min-height:100vh;
+  overflow:hidden;
+  padding-top:60px;           /* offset the fixed .top-nav */
+  box-sizing:border-box;
+}
 
 /* SIDEBAR */
 .sidebar{width:320px;min-width:260px;background:var(--panel);padding:22px 18px;display:flex;flex-direction:column;gap:14px;border-right:1px solid var(--border);transition:transform .3s ease, width .3s ease;position:relative;z-index:50}
@@ -169,6 +176,8 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
   margin-right: auto;
   overflow: hidden; /* Prevent overflow */
   word-wrap: break-word; /* Handle long text */
+  max-height: 75vh; /* Keep chain within viewport */
+  overflow-y: auto; /* Scroll when long to avoid overlap */
 }
 
 /* Process Chain Toggle Button */
@@ -256,9 +265,13 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
 
 .process-chain-content {
   transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
-  overflow: hidden;
-  max-height: 5000px; /* Large enough for all steps */
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 70vh;
   opacity: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* consistent vertical breathing room */
 }
 
 .process-chain.collapsed .process-chain-content {
@@ -271,14 +284,15 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
 .chain-step {
   display: none; /* Hidden by default, revealed sequentially */
   align-items: flex-start;
-  gap: 14px; /* Increased gap for better spacing */
-  padding: 12px 0;
+  gap: 16px; /* More spacing between dot and content */
+  padding: 14px 0 18px;
   position: relative;
   opacity: 0;
   transform: translateY(-10px);
-  min-height: 52px; /* Increased min-height for better alignment */
+  min-height: 56px; /* Slightly taller to prevent overlap */
   width: 100%; /* Ensure full width */
   box-sizing: border-box; /* Include padding in width */
+  flex-wrap: wrap; /* Allow long content/preview to wrap beneath */
 }
 
 .chain-step.chain-step-visible {
@@ -363,15 +377,18 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
   word-break: break-word; /* Break words if needed */
   max-width: 100%; /* Prevent overflow */
   padding-top: 0; /* Align content with indicator */
+  padding-right: 120px; /* Reserve space for right-aligned preview */
+  position: relative;
   display: flex;
   flex-direction: column;
+  row-gap: 3px; /* Tight vertical rhythm within a node */
 }
 
 .chain-step-title {
   font-size: 0.95rem;
   color: var(--text);
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: 1px;
   overflow-wrap: break-word;
   word-wrap: break-word;
   line-height: 1.4; /* Better line height for alignment */
@@ -390,13 +407,16 @@ body *{transition:background-color 0.2s, border-color 0.2s, color 0.2s;}
 .chain-step-message {
   font-size: 0.85rem;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 0;
   line-height: 1.4;
 }
 
 .chain-step-preview {
-  margin-top: 8px;
-  padding: 6px 14px;
+  margin-top: 0;
+  position: absolute;
+  right: 12px; /* Nudge left to align better with content */
+  top: 0;
+  padding: 8px 14px;
   font-size: 0.8rem;
   background: transparent;
   border: 1px solid var(--border);

@@ -43,8 +43,18 @@ window.openHistoryDetailModal = async function(sessionId) {
       if (typeof renderHistoryDetailFull === 'function') {
         if (data.status === 'success' && data.detail) {
           renderHistoryDetailFull(data.detail);
+          // Update the history card in sidebar with correct data
+          console.log('[History Detail SIMPLE] Calling updateHistoryCard with sessionId:', sessionId);
+          if (typeof window.updateHistoryCard === 'function') {
+            window.updateHistoryCard(sessionId, data.detail);
+            setTimeout(() => window.updateHistoryCard(sessionId, data.detail), 100);
+          }
         } else if (data && !data.error && (data.metadata || data.analysis)) {
           renderHistoryDetailFull(data);
+          // Update the history card in sidebar with correct data
+          if (typeof window.updateHistoryCard === 'function') {
+            window.updateHistoryCard(sessionId, data);
+          }
         } else {
           if (content) {
             content.innerHTML = `<div class="error">Failed to load history details: ${data.error || 'Unknown error'}</div>`;
@@ -53,8 +63,20 @@ window.openHistoryDetailModal = async function(sessionId) {
       } else if (typeof window.renderHistoryDetailFull === 'function') {
         if (data.status === 'success' && data.detail) {
           window.renderHistoryDetailFull(data.detail);
+          // Update the history card in sidebar with correct data
+          console.log('[History Detail SIMPLE] Calling updateHistoryCard with sessionId:', sessionId);
+          if (typeof window.updateHistoryCard === 'function') {
+            window.updateHistoryCard(sessionId, data.detail);
+            setTimeout(() => window.updateHistoryCard(sessionId, data.detail), 100);
+          }
         } else if (data && !data.error && (data.metadata || data.analysis)) {
           window.renderHistoryDetailFull(data);
+          // Update the history card in sidebar with correct data
+          console.log('[History Detail SIMPLE] Calling updateHistoryCard with sessionId:', sessionId);
+          if (typeof window.updateHistoryCard === 'function') {
+            window.updateHistoryCard(sessionId, data);
+            setTimeout(() => window.updateHistoryCard(sessionId, data), 100);
+          }
         } else {
           if (content) {
             content.innerHTML = `<div class="error">Failed to load history details: ${data.error || 'Unknown error'}</div>`;
@@ -65,6 +87,17 @@ window.openHistoryDetailModal = async function(sessionId) {
         if (content) {
           const partNumber = (data.detail?.metadata?.ic_info?.part_number || data.metadata?.ic_info?.part_number || 'UNKNOWN');
           content.innerHTML = `<div class="tab-content-section"><h3>${partNumber}</h3><p>Full rendering functions loading...</p><p>Session: ${sessionId}</p></div>`;
+        }
+        // Still try to update card even in fallback mode
+        console.log('[History Detail SIMPLE] Fallback: Calling updateHistoryCard with sessionId:', sessionId);
+        if (typeof window.updateHistoryCard === 'function') {
+          if (data.status === 'success' && data.detail) {
+            window.updateHistoryCard(sessionId, data.detail);
+            setTimeout(() => window.updateHistoryCard(sessionId, data.detail), 100);
+          } else if (data && !data.error && (data.metadata || data.analysis)) {
+            window.updateHistoryCard(sessionId, data);
+            setTimeout(() => window.updateHistoryCard(sessionId, data), 100);
+          }
         }
       }
     } catch (error) {
@@ -106,9 +139,12 @@ setTimeout(() => {
   }
 }, 100);
 
-// Use existing API_BASE_URL if available, otherwise declare it
-const API_BASE_URL = window.API_BASE_URL || 'http://localhost:5001';
-window.API_BASE_URL = API_BASE_URL; // Store for other scripts
+// Use existing API_BASE_URL if available, otherwise set it
+if (!window.API_BASE_URL) {
+  window.API_BASE_URL = 'http://localhost:5001';
+}
+// Use var instead of const to allow redeclaration when both history-detail files are loaded
+var API_BASE_URL = window.API_BASE_URL;
 let currentHistoryDetail = null;
 let activeTab = 'ic-details';
 
@@ -174,10 +210,13 @@ window.renderHistoryDetailFull = function renderHistoryDetailFull(detail) {
       <button class="tab-btn ${activeTab === 'ic-details' ? 'active' : ''}" onclick="window.switchHistoryTab('ic-details')">
         IC Details
       </button>
+      ${toolOutputs.preprocess ? `<button class="tab-btn ${activeTab === 'preprocess' ? 'active' : ''}" onclick="window.switchHistoryTab('preprocess')">Preprocessing</button>` : ''}
       ${toolOutputs.identify ? `<button class="tab-btn ${activeTab === 'identify' ? 'active' : ''}" onclick="window.switchHistoryTab('identify')">Identification</button>` : ''}
       ${toolOutputs.scrape ? `<button class="tab-btn ${activeTab === 'scrape' ? 'active' : ''}" onclick="window.switchHistoryTab('scrape')">Datasheet Scrape</button>` : ''}
       ${toolOutputs.parse ? `<button class="tab-btn ${activeTab === 'parse' ? 'active' : ''}" onclick="window.switchHistoryTab('parse')">Datasheet Parse</button>` : ''}
+      ${analysis.pin_counter ? `<button class="tab-btn ${activeTab === 'pin_counter' ? 'active' : ''}" onclick="window.switchHistoryTab('pin_counter')">Pin Counter</button>` : ''}
       ${analysis.dimension_analysis ? `<button class="tab-btn ${activeTab === 'dimension' ? 'active' : ''}" onclick="window.switchHistoryTab('dimension')">Dimension Analysis</button>` : ''}
+      ${analysis.histogram_analysis ? `<button class="tab-btn ${activeTab === 'histogram' ? 'active' : ''}" onclick="window.switchHistoryTab('histogram')">Histogram Filters</button>` : ''}
       ${analysis.visual_comparison ? `<button class="tab-btn ${activeTab === 'visual' ? 'active' : ''}" onclick="window.switchHistoryTab('visual')">Visual Analysis</button>` : ''}
       <button class="tab-btn ${activeTab === 'oem-info' ? 'active' : ''}" onclick="window.switchHistoryTab('oem-info')">OEM Info</button>
       <button class="tab-btn ${activeTab === 'report' ? 'active' : ''}" onclick="window.switchHistoryTab('report')">Full Report</button>
@@ -202,8 +241,12 @@ function renderTabContentFull(tabName, detail, analysis, filePaths, toolOutputs)
       return renderToolOutputFull('scrape', toolOutputs.scrape, 'Datasheet Scraping');
     case 'parse':
       return renderToolOutputFull('parse', toolOutputs.parse, 'Datasheet Parsing');
+    case 'pin_counter':
+      return renderToolOutputFull('pin_counter', analysis.pin_counter, 'Pin Counter');
     case 'dimension':
       return renderDimensionAnalysisFull(analysis.dimension_analysis, filePaths);
+    case 'histogram':
+      return renderHistogramAnalysisFull(analysis.histogram_analysis || {}, filePaths, analysis.visual_comparison);
     case 'visual':
       return renderVisualAnalysisFull(analysis.visual_comparison, analysis.anomalies);
     case 'oem-info':
@@ -236,41 +279,73 @@ function renderICDetailsFull(detail) {
 
 // Render tool output
 function renderToolOutputFull(toolName, toolData, toolTitle) {
-  if (!toolData) {
+  const resolvedData = (toolData && typeof toolData === 'object' && 'data' in toolData)
+    ? (toolData.data || {})
+    : toolData;
+
+  if (!resolvedData) {
     return '<div class="tab-content-section"><p>No output available for this tool</p></div>';
   }
   
   let html = `<div class="tab-content-section"><h3>${toolTitle}</h3>`;
   
-  if (toolName === 'identify' && typeof toolData === 'object') {
+  if (toolName === 'identify' && typeof resolvedData === 'object') {
     html += '<div class="tool-preview">';
-    if (toolData.part_number) html += `<div class="preview-item"><strong>Part Number:</strong> ${escapeHtml(toolData.part_number)}</div>`;
-    if (toolData.manufacturer) html += `<div class="preview-item"><strong>Manufacturer:</strong> ${escapeHtml(toolData.manufacturer)}</div>`;
-    if (toolData.package_type) html += `<div class="preview-item"><strong>Package:</strong> ${escapeHtml(toolData.package_type)}</div>`;
-    if (toolData.pin_count) html += `<div class="preview-item"><strong>Pin Count:</strong> ${toolData.pin_count}</div>`;
-    if (toolData.confidence) html += `<div class="preview-item"><strong>Confidence:</strong> ${toolData.confidence}%</div>`;
+    if (resolvedData.part_number) html += `<div class="preview-item"><strong>Part Number:</strong> ${escapeHtml(resolvedData.part_number)}</div>`;
+    if (resolvedData.manufacturer) html += `<div class="preview-item"><strong>Manufacturer:</strong> ${escapeHtml(resolvedData.manufacturer)}</div>`;
+    if (resolvedData.package_type) html += `<div class="preview-item"><strong>Package:</strong> ${escapeHtml(resolvedData.package_type)}</div>`;
+    if (resolvedData.pin_count) html += `<div class="preview-item"><strong>Pin Count:</strong> ${resolvedData.pin_count}</div>`;
+    if (resolvedData.confidence) html += `<div class="preview-item"><strong>Confidence:</strong> ${resolvedData.confidence}%</div>`;
     html += '</div><details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre></details>`;
-  } else if (toolName === 'scrape' && typeof toolData === 'object') {
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre></details>`;
+  } else if (toolName === 'scrape' && typeof resolvedData === 'object') {
     html += '<div class="tool-preview">';
-    if (toolData.datasheet_url) html += `<div class="preview-item"><strong>Datasheet URL:</strong> <a href="${escapeHtml(toolData.datasheet_url)}" target="_blank">${escapeHtml(toolData.datasheet_url)}</a></div>`;
-    if (toolData.title) html += `<div class="preview-item"><strong>Title:</strong> ${escapeHtml(toolData.title)}</div>`;
-    if (toolData.summary) html += `<div class="preview-item"><strong>Summary:</strong> ${escapeHtml(toolData.summary)}</div>`;
+    if (resolvedData.datasheet_url) html += `<div class="preview-item"><strong>Datasheet URL:</strong> <a href="${escapeHtml(resolvedData.datasheet_url)}" target="_blank">${escapeHtml(resolvedData.datasheet_url)}</a></div>`;
+    if (resolvedData.title) html += `<div class="preview-item"><strong>Title:</strong> ${escapeHtml(resolvedData.title)}</div>`;
+    if (resolvedData.summary) html += `<div class="preview-item"><strong>Summary:</strong> ${escapeHtml(resolvedData.summary)}</div>`;
     html += '</div><details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre></details>`;
-  } else if (toolName === 'parse' && typeof toolData === 'object') {
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre></details>`;
+  } else if (toolName === 'parse' && typeof resolvedData === 'object') {
     html += '<div class="tool-preview">';
-    if (toolData.specifications) {
+    if (resolvedData.specifications) {
       html += '<div class="preview-item"><strong>Specifications Found:</strong></div><ul class="spec-list">';
-      for (const [key, value] of Object.entries(toolData.specifications)) {
+      for (const [key, value] of Object.entries(resolvedData.specifications)) {
         html += `<li><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</li>`;
       }
       html += '</ul>';
     }
     html += '</div><details class="json-details"><summary>View Full JSON</summary>';
-    html += `<pre class="json-display">${JSON.stringify(toolData, null, 2)}</pre></details>`;
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre></details>`;
+  } else if (toolName === 'pin_counter' && typeof resolvedData === 'object') {
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    const renderImage = (label, path) => {
+      if (!path) return '';
+      const cleanPath = path.replace(/^.*api_results[\\/]/, '').replace(/^[\\/]/, '');
+      const url = path.startsWith('http')
+        ? path
+        : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+      return `
+        <div class="preview-item">
+          <strong>${label}:</strong><br>
+          <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;">
+        </div>
+      `;
+    };
+    html += '<div class="tool-preview">';
+    const classificationStats = resolvedData.classification_stats || {};
+    html += `<div class="preview-item"><strong>Pins Detected (conf > 0.5):</strong> ${resolvedData.pins_detected ?? 'N/A'}</div>`;
+    html += `<div class="preview-item"><strong>Notches Detected (conf > 0.5):</strong> ${resolvedData.notches_detected ?? 'N/A'}</div>`;
+    html += `<div class="preview-item" style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+      <strong>Classification:</strong><br>
+      <span style="color: #22c55e;">Authentic (conf ≥ 0.8): ${classificationStats.authentic || 0}</span><br>
+      <span style="color: #f59e0b;">Suspicious (0.5 ≤ conf < 0.8): ${classificationStats.suspicious || 0}</span><br>
+      <span style="color: #ef4444;">Counterfeit (conf < 0.5): ${classificationStats.counterfeit || 0} (filtered out)</span>
+    </div>`;
+    html += renderImage('Pin Counter Visualization', resolvedData.visualization || resolvedData.overlay_path);
+    html += '</div><details class="json-details"><summary>View Full JSON</summary>';
+    html += `<pre class="json-display">${JSON.stringify(resolvedData, null, 2)}</pre></details>`;
   } else {
-    html += `<pre class="json-display">${typeof toolData === 'object' ? JSON.stringify(toolData, null, 2) : escapeHtml(String(toolData))}</pre>`;
+    html += `<pre class="json-display">${typeof resolvedData === 'object' ? JSON.stringify(resolvedData, null, 2) : escapeHtml(String(resolvedData))}</pre>`;
   }
   
   html += '</div>';
@@ -280,14 +355,16 @@ function renderToolOutputFull(toolName, toolData, toolTitle) {
 // Render dimension analysis
 function renderDimensionAnalysisFull(dimensionAnalysis, filePaths) {
   const dim = dimensionAnalysis || {};
-  const vizPath = filePaths.dimension_viz;
+  const vizPath = dim.dimension_visualization || filePaths.dimension_viz;
   return `
     <div class="tab-content-section">
       <h3>Dimension Analysis</h3>
-      ${vizPath ? `<div class="image-viewer"><img src="${API_BASE_URL}/api_results/${vizPath}" alt="Dimension Visualization"></div>` : ''}
+      ${vizPath ? `<div class="image-viewer"><img src="${vizPath.startsWith('http') ? vizPath : `${API_BASE_URL}/api_results/${vizPath}`}" alt="SAM 2.1 Visualization"></div>` : ''}
       <div class="detail-grid">
         ${dim.expected_aspect_ratio ? `<div class="detail-item"><label>Expected Aspect Ratio</label><value>${dim.expected_aspect_ratio.toFixed(2)}</value></div>` : ''}
         ${dim.measured_aspect_ratio ? `<div class="detail-item"><label>Measured Aspect Ratio</label><value>${dim.measured_aspect_ratio.toFixed(2)}</value></div>` : ''}
+        ${dim.mask_coverage !== undefined && dim.mask_coverage !== null ? `<div class="detail-item"><label>Mask Coverage</label><value>${(dim.mask_coverage * 100).toFixed(1)}%</value></div>` : ''}
+        ${dim.mask_area_px ? `<div class="detail-item"><label>Mask Area (px)</label><value>${dim.mask_area_px}</value></div>` : ''}
         ${dim.confidence_score !== undefined ? `<div class="detail-item"><label>Confidence Score</label><value>${dim.confidence_score.toFixed(1)}/100</value></div>` : ''}
       </div>
       ${dim.dimension_source ? `<div class="detail-section"><p><strong>Source:</strong> ${escapeHtml(dim.dimension_source)}</p></div>` : ''}
@@ -328,6 +405,146 @@ function renderVisualAnalysisFull(visualComparison, anomalies) {
       ` : '<p>No anomalies detected</p>'}
     </div>
   `;
+}
+
+// Render Histogram Analysis
+function renderHistogramAnalysisFull(histogramAnalysis, filePaths, visualComparison = null) {
+  if (!histogramAnalysis || !histogramAnalysis.strip_paths || histogramAnalysis.strip_paths.length === 0) {
+    return '<div class="tab-content-section"><p>No histogram analysis available</p></div>';
+  }
+  
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
+  const strips = histogramAnalysis.strip_paths || [];
+  const dashboardPath = histogramAnalysis.dashboard_path || filePaths.histogram_dashboard;
+  
+  const filterInfo = {
+    '01_resize': { name: 'Resize', detects: 'Image preprocessing', verdict: 'N/A' },
+    '02_grayscale': { name: 'Grayscale', detects: 'Color normalization', verdict: 'N/A' },
+    '03_gamma': { name: 'Gamma Correction', detects: 'Dark epoxy regions', verdict: 'N/A' },
+    '04_hist_equalization': { name: 'Histogram Equalization', detects: 'Global contrast enhancement', verdict: 'N/A' },
+    '05_clahe': { name: 'CLAHE', detects: 'Surface texture defects', verdict: 'N/A' },
+    '06_gaussian_blur': { name: 'Gaussian Blur', detects: 'Noise smoothing for edge detection', verdict: 'N/A' },
+    '07_edge_map': { name: 'Edge Map', detects: 'Cracks and package boundaries', verdict: 'N/A' },
+    '08_color_jitter': { name: 'Color Jitter', detects: 'Illumination variations', verdict: 'N/A' },
+    '09_gaussian_noise': { name: 'Gaussian Noise', detects: 'Model robustness testing', verdict: 'N/A' },
+    '10_otsu_threshold': { name: 'Otsu Threshold', detects: 'Contamination and foreground defects', verdict: 'N/A' },
+    '11_normalize_tensor': { name: 'Normalize Tensor', detects: 'Model-ready preprocessing', verdict: 'N/A' }
+  };
+  
+  // Get AI analysis histogram filter verdicts if available
+  const aiVerdicts = visualComparison?.histogram_filter_verdicts || null;
+  const aiReasoning = visualComparison?.histogram_filter_reasoning || null;
+  
+  const getVerdict = (stepName, stats, aiVerdicts = null) => {
+    // First, try to use AI analysis verdict if available
+    if (aiVerdicts && aiVerdicts[stepName]) {
+      return aiVerdicts[stepName];
+    }
+    
+    // Fallback to calculated verdict based on statistics
+    if (!stats) return 'N/A';
+    switch(stepName) {
+      case '05_clahe':
+        return ((stats.entropy || 0) > 4.0 && (stats.contrast || 0) > 150) ? 'Yes' : 'No';
+      case '07_edge_map':
+        return Math.abs(stats.skewness || 0) > 5.0 ? 'Yes' : 'No';
+      case '10_otsu_threshold':
+        return ((stats.contrast || 0) > 200 && (stats.dynamic_range || 0) > 0.5) ? 'Yes' : 'No';
+      case '06_gaussian_blur':
+        return (stats.entropy || 0) < 6.0 ? 'Yes' : 'No';
+      default:
+        return 'N/A';
+    }
+  };
+  
+  const renderImage = (path, label) => {
+    if (!path) return '';
+    const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+    const url = path.startsWith('http')
+      ? path
+      : `${API_BASE_URL}/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+    return `
+      <div class="histogram-strip-item">
+        <h4>${escapeHtml(label)}</h4>
+        <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;cursor:pointer;" onclick="window.open('${url}', '_blank')">
+      </div>
+    `;
+  };
+  
+  let html = `
+    <div class="tab-content-section">
+      <h3>Histogram Filter Analysis</h3>
+      <p>11 image processing filters applied to enhance defect detection.</p>
+      ${dashboardPath ? `
+        <div style="margin-bottom: 30px;">
+          <h4>Complete Dashboard</h4>
+          ${renderImage(dashboardPath, 'Histogram Filter Dashboard')}
+        </div>
+      ` : ''}
+      <div>
+        <h4>Individual Filter Strips</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+  `;
+  
+  strips.forEach(stripPath => {
+    const stepName = stripPath.split('/').pop().replace('_strip.png', '');
+    const info = filterInfo[stepName] || { 
+      name: stepName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      detects: 'Image processing filter',
+      verdict: 'N/A'
+    };
+    // Use AI analysis verdict if available, otherwise use default
+    const initialVerdict = aiVerdicts && aiVerdicts[stepName] ? aiVerdicts[stepName] : info.verdict;
+    let oneLiner = `${info.name}: ${info.detects} - Verdict: ${initialVerdict}`;
+    // Add AI analysis reasoning if available
+    if (aiReasoning && aiReasoning[stepName]) {
+      oneLiner += ` (${aiReasoning[stepName]})`;
+    }
+    html += renderImage(stripPath, oneLiner);
+  });
+  
+  html += `
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Load JSON and update verdicts asynchronously
+  if (histogramAnalysis.analysis_json_path) {
+    const jsonPath = histogramAnalysis.analysis_json_path;
+    const cleanPath = jsonPath.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+    const jsonUrl = `${API_BASE_URL}/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+    
+    setTimeout(() => {
+      fetch(jsonUrl)
+        .then(res => res.json())
+        .then(data => {
+          const stripItems = document.querySelectorAll('.histogram-strip-item');
+          stripItems.forEach(item => {
+            const img = item.querySelector('img');
+            if (img && img.src) {
+              const stepName = img.src.split('/').pop().replace('_strip.png', '');
+              const info = filterInfo[stepName];
+              if (info && data.filters && data.filters[stepName]) {
+                const stats = data.filters[stepName].statistics;
+                const verdict = getVerdict(stepName, stats, aiVerdicts);
+                let oneLiner = `${info.name}: ${info.detects} - Verdict: ${verdict}`;
+                // Add AI analysis reasoning if available
+                if (aiReasoning && aiReasoning[stepName]) {
+                  oneLiner += ` (${aiReasoning[stepName]})`;
+                }
+                const h4 = item.querySelector('h4');
+                if (h4) h4.textContent = oneLiner;
+                if (img) img.alt = oneLiner;
+              }
+            }
+          });
+        })
+        .catch(err => console.warn('Could not load histogram analysis JSON:', err));
+    }, 100);
+  }
+  
+  return html;
 }
 
 // Render OEM Info

@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
 """
-Dimension & Aspect Ratio Estimator
+Dimension & Aspect Ratio Estimator (SAM-first)
 
-Analyzes IC physical dimensions and proportions to detect counterfeits.
-
-Key Metrics:
-1. Aspect Ratio (length/width) - should match datasheet
-2. Pin Pitch Uniformity - pins should be evenly spaced
-3. Package Proportions - overall shape validation
-
-Method:
-- Detect IC body (main rectangular region)
-- Measure dimensions in pixels
-- Calculate aspect ratio
-- Compare with expected specs
-- Detect pin regions and measure spacing
+Analyzes IC physical dimensions and proportions using SAM 2.1 masks only.
+We rely on the segmentation mask to derive aspect ratio and mask-driven
+metrics that can be compared with OEM datasheet specs. No CV fallback.
 """
 
+import os
 import cv2
 import numpy as np
 from scipy import stats
@@ -24,13 +15,22 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Optional
 import json
 from pathlib import Path
+from tools.sam21_segmenter import generate_sam21_mask, Sam21NotAvailable
 
 # Set matplotlib to use non-GUI backend (required for Flask/threading)
 import matplotlib
 matplotlib.use('Agg')  # Non-GUI backend - works in threads
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+
+
+DEFAULT_SAM21_CHECKPOINT = (
+    os.getenv("SAM21_CHECKPOINT_PATH")
+    or os.getenv("SAM21_MODEL_PATH")
+    or str(Path(__file__).parent.parent / "weights" / "sam2.1_b.pt")
+)
+# Default config name works with pip-installed sam2 Hydra search path.
+DEFAULT_SAM21_MODEL_CFG = os.getenv("SAM21_MODEL_CFG") or "configs/sam2.1/sam2.1_hiera_b+"
 
 
 @dataclass
@@ -63,99 +63,204 @@ class DimensionResult:
     bboxes: List[Dict]
     metrics: Dict
     
+    # Optional mask metadata (defaults last)
+    mask_score: Optional[float] = None
+    mask_area_px: Optional[int] = None
+    mask_coverage: Optional[float] = None
+    mask_source: Optional[str] = None
+    mask_visualization_path: Optional[str] = None
 
-def detect_ic_body(image_path: str) -> Tuple[np.ndarray, Dict]:
+
+def _mask_to_bbox(mask: np.ndarray) -> Dict:
+    """Convert a binary mask into a rotated bbox description."""
+    if mask is None or mask.size == 0:
+        raise ValueError("Empty mask provided to _mask_to_bbox.")
+
+    mask_uint8 = mask.astype(np.uint8)
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise ValueError("No contours found in SAM mask.")
+
+    main_contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(main_contour)
+    box_pts = cv2.boxPoints(rect)
+    box_pts = np.int32(box_pts)
+
+    x, y, bw, bh = cv2.boundingRect(main_contour)
+    rw, rh = rect[1]
+    if rw < rh:
+        rw, rh = rh, rw
+
+    return {
+        'x': int(x),
+        'y': int(y),
+        'w': int(bw),
+        'h': int(bh),
+        'rw': float(rw),
+        'rh': float(rh),
+        'angle': float(rect[2]),
+        'box_pts': box_pts.tolist(),
+        'method': 'sam_mask'
+    }
+
+
+def _isolate_ic_mask(mask: np.ndarray, min_coverage: float = 0.05, max_coverage: float = 0.75) -> np.ndarray:
     """
-    Simple IC body detection using minAreaRect (older, simpler approach).
-    Returns:
-        image: Original image
-        rect: dict with x, y, w, h (axis-aligned) and box_pts (rotated box)
+    Post-process SAM mask to isolate just the IC body by:
+    1. Keeping only the largest connected component
+    2. Cleaning with morphological operations
+    3. Filtering by reasonable coverage bounds
     """
+    mask_uint8 = (mask > 0).astype(np.uint8)
+    h, w = mask_uint8.shape
+    total_pixels = h * w
+    
+    # Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_uint8, connectivity=8)
+    
+    if num_labels < 2:  # Only background
+        return mask_uint8
+    
+    # Find the largest component (excluding background label 0)
+    component_areas = stats[1:, cv2.CC_STAT_AREA]
+    largest_idx = np.argmax(component_areas) + 1  # +1 because label 0 is background
+    
+    # Check coverage
+    largest_area = component_areas[largest_idx - 1]
+    coverage = largest_area / total_pixels
+    
+    # Filter by coverage bounds
+    if coverage < min_coverage or coverage > max_coverage:
+        # If largest component is unreasonable, try second largest
+        if len(component_areas) > 1:
+            sorted_indices = np.argsort(component_areas)[::-1]
+            for idx in sorted_indices[1:]:  # Skip the largest we already checked
+                candidate_idx = idx + 1
+                candidate_area = component_areas[idx]
+                candidate_coverage = candidate_area / total_pixels
+                if min_coverage <= candidate_coverage <= max_coverage:
+                    largest_idx = candidate_idx
+                    coverage = candidate_coverage
+                    break
+    
+    # Create mask with only the selected component
+    isolated_mask = (labels == largest_idx).astype(np.uint8) * 255
+    
+    # Clean up with morphological operations
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    isolated_mask = cv2.morphologyEx(isolated_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    isolated_mask = cv2.morphologyEx(isolated_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    
+    return isolated_mask
+
+
+def _detect_body_with_sam(image_path: str) -> Tuple[np.ndarray, Dict, Dict]:
+    """
+    Detect IC body using SAM 2.1. Returns (mask, meta, rect) or raises on failure.
+    Post-processes the mask to isolate just the IC body.
+    """
+    if not DEFAULT_SAM21_CHECKPOINT:
+        raise Sam21NotAvailable("SAM 2.1 checkpoint path is not configured.")
+    
+    # Load image to get dimensions for better box prompt
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not read image: {image_path}")
+    h, w = img.shape[:2]
     
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape
+    # Use center region as box prompt (IC is typically centered)
+    # This helps SAM focus on the IC rather than the entire image
+    center_margin = 0.2  # Use 60% of image centered
+    x0 = int(w * center_margin)
+    y0 = int(h * center_margin)
+    x1 = int(w * (1 - center_margin))
+    y1 = int(h * (1 - center_margin))
+    box_prompt = np.array([[x0, y0, x1, y1]], dtype=np.float32)
     
-    # Simple threshold to isolate dark IC body
-    _, dark_mask = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
+    mask, meta = generate_sam21_mask(
+        image_path=image_path,
+        checkpoint_path=DEFAULT_SAM21_CHECKPOINT,
+        model_cfg=DEFAULT_SAM21_MODEL_CFG,
+        device=None,
+        box_prompt=box_prompt,
+    )
+    if mask is None:
+        raise ValueError("SAM 2.1 returned an empty mask.")
     
-    # Clean up noise
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-    dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    # Post-process mask to isolate IC body
+    isolated_mask = _isolate_ic_mask(mask)
     
-    contours, _ = cv2.findContours(dark_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Update meta with isolated mask coverage
+    isolated_area = np.count_nonzero(isolated_mask)
+    isolated_coverage = float(isolated_area) / float(h * w)
+    meta['coverage'] = isolated_coverage
+    meta['area_px'] = int(isolated_area)
     
-    best_rect = None
-    best_score = 0
-    
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < (h * w * 0.10) or area > (h * w * 0.70):
-            continue
-        
-        # Get bounding rectangle
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        
-        # Check if contour fills the bounding box (rectangular-ness)
-        rect_area = bw * bh
-        fill_ratio = area / rect_area
-        
-        # IC body should be very rectangular (fill > 0.85)
-        if fill_ratio < 0.85:
-            continue
-        
-        # Check aspect ratio is reasonable (ICs are typically 1:1 to 2.5:1)
-        aspect = max(bw, bh) / min(bw, bh)
-        if aspect > 3.0 or aspect < 1.0:
-            continue
-        
-        # Score based on size and rectangularity
-        score = area * fill_ratio
-        
-        if score > best_score:
-            best_score = score
-            best_rect = {
-                'x': x, 'y': y, 'w': bw, 'h': bh,
-                'rw': max(bw, bh),  # Longer side
-                'rh': min(bw, bh),  # Shorter side
-                'angle': 0,
-                'box_pts': [
-                    [x, y],
-                    [x + bw, y],
-                    [x + bw, y + bh],
-                    [x, y + bh]
-                ],
-                'method': 'simple'
-            }
-    
-    if best_rect is None:
-        # Fallback: use center 50% of image
-        margin_h = int(h * 0.25)
-        margin_w = int(w * 0.25)
-        best_rect = {
-            'x': margin_w,
-            'y': margin_h,
-            'w': w - 2*margin_w,
-            'h': h - 2*margin_h,
-            'rw': max(w - 2*margin_w, h - 2*margin_h),
-            'rh': min(w - 2*margin_w, h - 2*margin_h),
-            'angle': 0,
-            'box_pts': [
-                [margin_w, margin_h],
-                [w - margin_w, margin_h],
-                [w - margin_w, h - margin_h],
-                [margin_w, h - margin_h],
-            ],
-            'method': 'fallback'
-        }
-        print("⚠️  Warning: Could not detect IC body, using fallback bbox")
-    else:
-        print(f"✓ IC body detected - sides: {best_rect['rw']:.1f} × {best_rect['rh']:.1f} px")
-    
-    return img, best_rect
+    rect = _mask_to_bbox(isolated_mask)
+    rect['method'] = 'sam_mask'
+    return isolated_mask, meta, rect
+
+
+def _render_mask_visualization(
+    image_path: str,
+    mask: np.ndarray,
+    measured_aspect: float,
+    expected_aspect: Optional[float],
+    coverage: Optional[float],
+    score: float,
+    verdict: str,
+    output_path: Optional[str] = None,
+) -> str:
+    """
+    Overlay SAM mask on the input image and annotate key metrics.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Could not read image for visualization: {image_path}")
+
+    # Normalize mask to uint8 and build overlay
+    mask_uint8 = (mask > 0).astype(np.uint8)
+    overlay = img.copy()
+    color = np.array([0, 0, 255], dtype=np.uint8)  # Red overlay
+    overlay[mask_uint8 > 0] = (overlay[mask_uint8 > 0] * 0.55 + color * 0.45).astype(np.uint8)
+
+    blended = cv2.addWeighted(img, 0.65, overlay, 0.35, 0)
+    img_rgb = cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)
+
+    # Build annotation text
+    lines = [f"Measured AR: {measured_aspect:.3f}"]
+    if expected_aspect:
+        lines.append(f"Expected AR: {expected_aspect:.3f}")
+    if coverage is not None:
+        lines.append(f"Mask coverage: {coverage*100:.1f}%")
+    lines.append(f"Score: {score:.1f}/100")
+    lines.append(f"Verdict: {verdict}")
+    annotation = "\n".join(lines)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.imshow(img_rgb)
+    ax.axis('off')
+    ax.set_title('SAM 2.1 Mask Overlay', fontsize=16, fontweight='bold', pad=12)
+    ax.text(
+        0.02, 0.98, annotation,
+        transform=ax.transAxes,
+        fontsize=12,
+        color='white',
+        fontweight='bold',
+        ha='left',
+        va='top',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='black', alpha=0.55)
+    )
+
+    if output_path is None:
+        img_path = Path(image_path)
+        output_path = str(img_path.with_name(f"{img_path.stem}_sam_mask_overlay.png"))
+    output_path_obj = Path(output_path)
+    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    return output_path
 
 
 def detect_pins_and_spacing(img: np.ndarray, body_bbox: Tuple[int, int, int, int]) -> Dict:
@@ -254,6 +359,49 @@ def detect_pins_and_spacing(img: np.ndarray, body_bbox: Tuple[int, int, int, int
     }
 
 
+def _generate_fake_mask_from_cropped_image(image_path: str) -> Tuple[np.ndarray, Dict, Dict]:
+    """
+    Generate a fake mask covering the entire cropped image.
+    Since the image is already cropped to the IC body by preprocessing,
+    we just create a full mask.
+    
+    Args:
+        image_path: Path to cropped IC image (from preprocessing)
+    
+    Returns:
+        (mask, metadata, rect_dict) - same format as _detect_body_with_sam
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Failed to read image: {image_path}")
+    
+    h, w = img.shape[:2]
+    
+    # Create full mask (all pixels = 1)
+    mask = np.ones((h, w), dtype=np.uint8) * 255
+    
+    # Create rect dict matching the format from _detect_body_with_sam
+    rect = {
+        'x': 0,
+        'y': 0,
+        'w': w,
+        'h': h,
+        'rw': float(w),
+        'rh': float(h),
+        'angle': 0.0,
+        'box_pts': [[0, 0], [w, 0], [w, h], [0, h]],
+        'method': 'preprocessing_crop'
+    }
+    
+    # Metadata
+    meta = {
+        'coverage': 1.0,  # Full coverage since it's already cropped
+        'source': 'preprocessing_crop'
+    }
+    
+    return mask, meta, rect
+
+
 def estimate_dimensions(
     image_path: str,
     expected_length_mm: Optional[float] = None,
@@ -263,18 +411,19 @@ def estimate_dimensions(
     Main dimension estimation function
     
     Args:
-        image_path: Path to IC image
+        image_path: Path to cropped IC image (from preprocessing pipeline)
         expected_length_mm: Expected body length from datasheet (mm)
         expected_width_mm: Expected body width from datasheet (mm)
     
     Returns:
         DimensionResult with analysis
     """
-    # Detect IC body
-    img, rect = detect_ic_body(image_path)
+    # Generate fake mask covering entire cropped image (already cropped by preprocessing)
+    sam_mask, sam_meta, rect = _generate_fake_mask_from_cropped_image(image_path)
+
     x, y, bw, bh = rect['x'], rect['y'], rect['w'], rect['h']
-    
-    # Calculate aspect ratio
+
+    # Calculate aspect ratio from SAM mask geometry
     measured_aspect = max(rect['rw'], rect['rh']) / min(rect['rw'], rect['rh'])
     
     # Expected aspect ratio
@@ -310,13 +459,17 @@ def estimate_dimensions(
     
     score = max(0, score)
     
-    # Confidence based on detection quality
-    confidence = 0.6
+    # Confidence based on mask coverage and reference availability
+    confidence = 0.5
+    coverage = sam_meta.get("coverage")
+    if coverage is None and sam_mask is not None:
+        coverage = float(np.count_nonzero(sam_mask)) / float(sam_mask.size)
+    if coverage is not None and coverage > 0.1:
+        confidence += 0.2
     if bw > 500 and bh > 500:  # Good resolution
-        confidence += 0.2
+        confidence += 0.15
     if expected_aspect:  # Have reference
-        confidence += 0.2
-    
+        confidence += 0.15
     confidence = min(1.0, confidence)
     
     # Verdict
@@ -345,10 +498,25 @@ def estimate_dimensions(
             'rh': int(rh),
             'angle': rect.get('angle', 0),
             'box_pts': box_pts,
-            'label': f'IC Body: {int(rw)}×{int(rh)} px (AR: {measured_aspect:.3f})'
+            'label': f'IC Body: {int(rw)}×{int(rh)} px (AR: {measured_aspect:.3f})',
+            'source': rect.get('method', 'sam_mask'),
         }
     ]
     
+    mask_area_px = int(np.count_nonzero(sam_mask)) if sam_mask is not None else None
+
+    # Create SAM visualization
+    viz_path = _render_mask_visualization(
+        image_path=image_path,
+        mask=sam_mask,
+        measured_aspect=measured_aspect,
+        expected_aspect=expected_aspect,
+        coverage=coverage,
+        score=score,
+        verdict=verdict,
+        output_path=None
+    )
+
     result = DimensionResult(
         body_width_px=int(min(bw, bh)),
         body_height_px=int(max(bw, bh)),
@@ -363,11 +531,18 @@ def estimate_dimensions(
         dimension_score=round(score, 1),
         confidence=round(confidence, 2),
         verdict=verdict,
+        mask_score=sam_meta.get("score") if sam_meta else None,
+        mask_area_px=mask_area_px or (sam_meta.get("area_px") if sam_meta else None),
+        mask_coverage=coverage if coverage is not None else (sam_meta.get("coverage") if sam_meta else None),
+        mask_source=sam_meta.get("model_cfg") if sam_meta else None,
+        mask_visualization_path=viz_path,
         bboxes=bboxes,
         metrics={
             'body_bbox': [int(x), int(y), int(bw), int(bh)],
             'pin_count_detected': 0,  # Not counting pins
-            'pin_spacings': []
+            'pin_spacings': [],
+            'mask_coverage': coverage if coverage is not None else (sam_meta.get("coverage") if sam_meta else None),
+            'mask_area_px': mask_area_px,
         }
     )
     
@@ -376,80 +551,11 @@ def estimate_dimensions(
 
 def visualize_dimensions(image_path: str, result: DimensionResult, output_path: Optional[str] = None):
     """
-    Create a clean visualization showing only the image with detected IC body bbox.
-    All detailed metrics will be shown in the PDF table instead.
-    
-    Args:
-        image_path: Path to input image
-        result: DimensionResult object
-        output_path: Optional output path. If not provided, saves next to input image.
+    Backward-compatible wrapper that returns the SAM mask visualization path.
     """
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Could not read image: {image_path}")
-    
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    
-    fig, ax = plt.subplots(figsize=(12, 9))
-    ax.imshow(img_rgb)
-    
-    # Draw IC body bbox (rotated if available)
-    body_bbox = [b for b in result.bboxes if b['type'] == 'ic_body'][0]
-    rw = body_bbox.get('rw', body_bbox.get('w', 0))
-    rh = body_bbox.get('rh', body_bbox.get('h', 0))
-    
-    if body_bbox.get('box_pts'):
-        pts = np.array(body_bbox['box_pts'])
-        poly = patches.Polygon(pts, closed=True, linewidth=4, edgecolor='#FF4444', facecolor='none')
-        ax.add_patch(poly)
-        # Position label at center horizontally, below the box vertically
-        bx = pts[:,0].mean()
-        by = pts[:,1].max() + 30  # Below the box
-    else:
-        rect = patches.Rectangle(
-            (body_bbox['x'], body_bbox['y']),
-            body_bbox['w'], body_bbox['h'],
-            linewidth=4, edgecolor='#FF4444', facecolor='none'
-        )
-        ax.add_patch(rect)
-        bx = body_bbox['x'] + body_bbox['w']/2
-        by = body_bbox['y'] + body_bbox['h'] + 30
-    
-    # Add label (below the box to avoid overlap with title)
-    label_text = f"IC Body Detected\n{int(rw)}×{int(rh)} px\nAR: {result.measured_aspect_ratio:.3f}"
-    ax.text(
-        bx, 
-        by + 20,
-        label_text,
-        color='#FF4444', 
-        fontsize=12, 
-        fontweight='bold',
-        ha='center',
-        va='top',
-        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', edgecolor='#FF4444', linewidth=2, alpha=0.9)
-    )
-    
-    ax.set_title('Dimension Analysis - Detected IC Body', fontsize=16, fontweight='bold', pad=20)
-    ax.axis('off')
-    
-    plt.tight_layout()
-    
-    # Use provided output_path or save next to original image
-    if output_path is None:
-        img_path = Path(image_path)
-        output_path = str(img_path.with_name(f"{img_path.stem}_dimension_analysis.png"))
-    else:
-        output_path = str(output_path)
-    
-    # Ensure output directory exists
-    output_path_obj = Path(output_path)
-    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-    
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
-    plt.close()  # Close to avoid display issues
-    print(f"✅ Saved visualization: {output_path}")
-    
-    return output_path
+    if result.mask_visualization_path:
+        return result.mask_visualization_path
+    return result.mask_visualization_path
 
 
 def save_results(result: DimensionResult, output_path: str):

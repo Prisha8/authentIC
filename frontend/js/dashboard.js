@@ -464,9 +464,10 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
       let totalCounterfeit = 0;
       let totalVisualMatch = 0;
       let totalAvgScore = 0;
-      let totalConfidence = 0;
+      let totalDimensionScore = 0;
       let totalProcessingTime = 0;
       let itemsWithScores = 0;
+      let itemsWithDimensionScore = 0;
       
       history.forEach(item => {
         const verdict = (item.verdict || '').toUpperCase();
@@ -482,7 +483,11 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
         const scores = item.scores || {};
         let visualMatch = scores.visual_match || scores.visualMatch || 0;
         let authenticityScore = scores.authenticity_score || scores.authenticityScore || 0;
-        let confidence = scores.confidence || 0;
+        // Try dimension_score first, then fallback to confidence_score from dimension_analysis
+        let dimensionScore = scores.dimension_score || scores.dimensionScore || 0;
+        if (dimensionScore === 0 && item.dimension_analysis) {
+          dimensionScore = item.dimension_analysis.confidence_score || item.dimension_analysis.dimension_score || 0;
+        }
         
         // Scores might be in 0-1 range (like 0.85) or 0-100 range (like 85)
         // If they're > 1, they're already in percentage format, otherwise convert
@@ -492,25 +497,30 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
         if (authenticityScore > 0 && authenticityScore <= 1) {
           authenticityScore = authenticityScore * 100;
         }
-        if (confidence > 0 && confidence <= 1) {
-          confidence = confidence * 100;
+        if (dimensionScore > 0 && dimensionScore <= 1) {
+          dimensionScore = dimensionScore * 100;
         }
         
         // Only count items that have at least one score
-        if (visualMatch > 0 || authenticityScore > 0 || confidence > 0) {
+        if (visualMatch > 0 || authenticityScore > 0 || dimensionScore > 0) {
           itemsWithScores++;
+        }
+        
+        // Count items with dimension score separately
+        if (dimensionScore > 0) {
+          itemsWithDimensionScore++;
         }
         
         totalVisualMatch += visualMatch;
         totalAvgScore += authenticityScore;
-        totalConfidence += confidence;
+        totalDimensionScore += dimensionScore;
         totalProcessingTime += item.processing_time_seconds || 0;
       });
       
       // Calculate averages (scores are already in 0-100 range after conversion above)
       const avgVisualMatch = itemsWithScores > 0 ? (totalVisualMatch / itemsWithScores) : 0;
       const avgScore = itemsWithScores > 0 ? (totalAvgScore / itemsWithScores) : 0;
-      const avgConfidence = itemsWithScores > 0 ? (totalConfidence / itemsWithScores) : 0;
+      const avgDimensionScore = itemsWithDimensionScore > 0 ? (totalDimensionScore / itemsWithDimensionScore) : 0;
       const avgProcessingTime = totalProcessed > 0 ? totalProcessingTime / totalProcessed : 0;
       
       // Calculate pending verifications (suspicious + counterfeit items)
@@ -519,7 +529,10 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
       // Update circular charts
       updateCircularChart('kpi-visual', avgVisualMatch, 'kpi-visual-text');
       updateCircularChart('kpi-metadata', avgScore, 'kpi-metadata-text');
-      updateCircularChart('kpi-confidence', avgConfidence, 'kpi-confidence-text');
+      updateCircularChart('kpi-dimension', avgDimensionScore, 'kpi-dimension-text');
+      
+      // Update bell curve chart
+      updateBellCurveChart(totalAuthentic, totalSuspicious, totalCounterfeit);
       
       // Update progress bars with better scaling
       // For total processed, use a max that's slightly above the current total for better visualization
@@ -535,10 +548,24 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
       const maxTime = 120;
       updateProgressBar('bar-time', avgProcessingTime, maxTime, 'bar-time-value', `${avgProcessingTime.toFixed(1)}s`);
       
-      // Update pending count in welcome section
-      const pendingCountEl = document.getElementById('pendingCount');
-      if (pendingCountEl) {
-        pendingCountEl.textContent = pendingCount;
+      // Update pending count in welcome section (after translations may have been applied)
+      const updatePendingCount = () => {
+        const pendingCountEl = document.getElementById('pendingCount');
+        if (pendingCountEl) {
+          pendingCountEl.textContent = pendingCount;
+        }
+      };
+      
+      // Try immediately
+      updatePendingCount();
+      
+      // Also try after a delay in case translations are still applying
+      setTimeout(updatePendingCount, 500);
+      setTimeout(updatePendingCount, 1000);
+      
+      // If updatePendingCountAfterTranslation function exists, use it
+      if (typeof window.updatePendingCountAfterTranslation === 'function') {
+        window.updatePendingCountAfterTranslation(pendingCount);
       }
       
       console.log('[Dashboard] KPIs updated from history:', {
@@ -549,7 +576,7 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
         pendingCount,
         avgVisualMatch: avgVisualMatch.toFixed(1),
         avgScore: avgScore.toFixed(1),
-        avgConfidence: avgConfidence.toFixed(1),
+        avgDimensionScore: avgDimensionScore.toFixed(1),
         avgProcessingTime: avgProcessingTime.toFixed(1)
       });
       
@@ -565,7 +592,8 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
       // Reset to zero if no data
       updateCircularChart('kpi-visual', 0, 'kpi-visual-text');
       updateCircularChart('kpi-metadata', 0, 'kpi-metadata-text');
-      updateCircularChart('kpi-confidence', 0, 'kpi-confidence-text');
+      updateCircularChart('kpi-dimension', 0, 'kpi-dimension-text');
+      updateBellCurveChart(0, 0, 0);
       updateProgressBar('bar-total', 0, 100, 'bar-total-value', 0);
       updateProgressBar('bar-authentic', 0, 100, 'bar-authentic-value', 0);
       updateProgressBar('bar-suspicious', 0, 100, 'bar-suspicious-value', 0);
@@ -581,7 +609,8 @@ window.updateKPIsFromHistory = async function updateKPIsFromHistory() {
     // Reset to zero on error
     updateCircularChart('kpi-visual', 0, 'kpi-visual-text');
     updateCircularChart('kpi-metadata', 0, 'kpi-metadata-text');
-    updateCircularChart('kpi-confidence', 0, 'kpi-confidence-text');
+    updateCircularChart('kpi-dimension', 0, 'kpi-dimension-text');
+    updateBellCurveChart(0, 0, 0);
     updateProgressBar('bar-total', 0, 100, 'bar-total-value', 0);
     updateProgressBar('bar-authentic', 0, 100, 'bar-authentic-value', 0);
     updateProgressBar('bar-suspicious', 0, 100, 'bar-suspicious-value', 0);
@@ -641,6 +670,230 @@ function updateCircularChart(chartId, value, textId) {
   }
   
   console.log(`[Dashboard] Updated ${chartId}: ${percentage.toFixed(1)}% (dash: ${dashLength.toFixed(2)}, offset: ${offset.toFixed(2)})`);
+}
+
+/**
+ * Bell curve chart instance
+ */
+let bellCurveChart = null;
+
+/**
+ * Update bell curve chart showing distribution of verdicts
+ * Shows a single bell curve with colored regions representing where each verdict type typically falls
+ */
+function updateBellCurveChart(authenticCount, suspiciousCount, counterfeitCount) {
+  const canvas = document.getElementById('verdictBellCurveChart');
+  if (!canvas) {
+    console.warn('[Dashboard] Bell curve canvas not found');
+    return;
+  }
+  
+  const ctx = canvas.getContext('2d');
+  const total = authenticCount + suspiciousCount + counterfeitCount;
+  
+  // If no data, show empty chart
+  if (total === 0) {
+    if (bellCurveChart) {
+      bellCurveChart.destroy();
+      bellCurveChart = null;
+    }
+    return;
+  }
+  
+  // Generate a single bell curve representing overall distribution
+  // The curve shows where ICs typically score, with colored regions for each verdict type
+  const dataPoints = 50;
+  const xMin = 0;
+  const xMax = 100;
+  const step = (xMax - xMin) / dataPoints;
+  
+  // Calculate weighted mean based on actual counts
+  // Authentic ICs typically score 70-100, Suspicious 40-70, Counterfeit 0-40
+  const authenticMean = 85;
+  const suspiciousMean = 55;
+  const counterfeitMean = 25;
+  
+  // Weighted average mean
+  const overallMean = total > 0 
+    ? (authenticCount * authenticMean + suspiciousCount * suspiciousMean + counterfeitCount * counterfeitMean) / total
+    : 50;
+  
+  // Standard deviation based on spread of verdicts
+  const overallStdDev = 20;
+  
+  // Generate single bell curve
+  const bellCurveData = [];
+  for (let i = 0; i <= dataPoints; i++) {
+    const x = xMin + i * step;
+    const y = total * Math.exp(-0.5 * Math.pow((x - overallMean) / overallStdDev, 2)) / (overallStdDev * Math.sqrt(2 * Math.PI));
+    bellCurveData.push({ x, y });
+  }
+  
+  // Create datasets for each region (for coloring)
+  const authenticData = bellCurveData.map(d => d.x >= 70 ? d.y : 0);
+  const suspiciousData = bellCurveData.map(d => d.x >= 40 && d.x < 70 ? d.y : 0);
+  const counterfeitData = bellCurveData.map(d => d.x < 40 ? d.y : 0);
+  
+  // Get computed styles for dark mode support
+  const isDarkMode = document.documentElement.classList.contains('dark-mode') || 
+                     window.getComputedStyle(document.body).backgroundColor.includes('rgb(15, 23, 36)');
+  
+  // Use brighter colors with higher opacity for dark mode visibility
+  const counterfeitColor = isDarkMode ? '#ff6b6b' : '#ef4444';
+  const suspiciousColor = isDarkMode ? '#ffb84d' : '#f59e0b';
+  const authenticColor = isDarkMode ? '#4ade80' : '#10b981';
+  
+  const counterfeitBg = isDarkMode ? 'rgba(255, 107, 107, 0.4)' : 'rgba(239, 68, 68, 0.3)';
+  const suspiciousBg = isDarkMode ? 'rgba(255, 184, 77, 0.4)' : 'rgba(245, 158, 11, 0.3)';
+  const authenticBg = isDarkMode ? 'rgba(74, 222, 128, 0.4)' : 'rgba(16, 185, 129, 0.3)';
+  
+  // Prepare chart data - single curve with colored segments
+  const chartData = {
+    labels: bellCurveData.map(d => d.x.toFixed(0)),
+    datasets: [
+      {
+        label: `Counterfeit (${counterfeitCount})`,
+        data: counterfeitData,
+        borderColor: counterfeitColor,
+        backgroundColor: counterfeitBg,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0
+      },
+      {
+        label: `Suspicious (${suspiciousCount})`,
+        data: suspiciousData,
+        borderColor: suspiciousColor,
+        backgroundColor: suspiciousBg,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0
+      },
+      {
+        label: `Authentic (${authenticCount})`,
+        data: authenticData,
+        borderColor: authenticColor,
+        backgroundColor: authenticBg,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0
+      }
+    ]
+  };
+  
+  const chartConfig = {
+    type: 'line',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: {
+            color: isDarkMode ? '#f1f5f9' : '#0f1724',
+            usePointStyle: true,
+            padding: 10,
+            font: {
+              size: 10
+            }
+          }
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+          titleColor: isDarkMode ? '#f1f5f9' : '#0f1724',
+          bodyColor: isDarkMode ? '#f1f5f9' : '#0f1724',
+          borderColor: isDarkMode ? '#334155' : '#e6e7ea',
+          borderWidth: 1,
+          padding: 10
+        }
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Authenticity Score (0-100)',
+            color: isDarkMode ? '#94a3b8' : '#6b7280',
+            font: {
+              size: 10
+            }
+          },
+          ticks: {
+            color: isDarkMode ? '#94a3b8' : '#6b7280',
+            font: {
+              size: 9
+            },
+            maxTicksLimit: 6
+          },
+          grid: {
+            color: isDarkMode ? '#334155' : '#e6e7ea',
+            drawBorder: false
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Frequency',
+            color: isDarkMode ? '#94a3b8' : '#6b7280',
+            font: {
+              size: 10
+            }
+          },
+          ticks: {
+            color: isDarkMode ? '#94a3b8' : '#6b7280',
+            font: {
+              size: 9
+            },
+            beginAtZero: true
+          },
+          grid: {
+            color: isDarkMode ? '#334155' : '#e6e7ea',
+            drawBorder: false
+          }
+        }
+      },
+      interaction: {
+        mode: 'nearest',
+        axis: 'x',
+        intersect: false
+      }
+    }
+  };
+  
+  // Destroy existing chart if it exists
+  if (bellCurveChart) {
+    bellCurveChart.destroy();
+    bellCurveChart = null;
+  }
+  
+  // Create new chart
+  bellCurveChart = new Chart(ctx, chartConfig);
+  
+  // Listen for dark mode changes and update chart colors
+  const updateChartOnDarkModeChange = () => {
+    if (total > 0) {
+      // Recreate chart with updated colors
+      updateBellCurveChart(authenticCount, suspiciousCount, counterfeitCount);
+    }
+  };
+  
+  // Only add listener once
+  if (!window.bellCurveDarkModeListenerAdded) {
+    // Listen for dark mode toggle
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    if (darkModeToggle) {
+      darkModeToggle.addEventListener('click', () => {
+        setTimeout(updateChartOnDarkModeChange, 100);
+      });
+    }
+    window.bellCurveDarkModeListenerAdded = true;
+  }
 }
 
 /**
@@ -943,9 +1196,19 @@ async function loadSuspiciousICs() {
       });
 
       // Update pending count
-      const pendingCountEl = document.getElementById('pendingCount');
-      if (pendingCountEl) {
-        pendingCountEl.textContent = suspiciousICs.length;
+      const updatePendingCount = () => {
+        const pendingCountEl = document.getElementById('pendingCount');
+        if (pendingCountEl) {
+          pendingCountEl.textContent = suspiciousICs.length;
+        }
+      };
+      
+      updatePendingCount();
+      setTimeout(updatePendingCount, 500);
+      
+      // If updatePendingCountAfterTranslation function exists, use it
+      if (typeof window.updatePendingCountAfterTranslation === 'function') {
+        window.updatePendingCountAfterTranslation(suspiciousICs.length);
       }
       console.log(`[Dashboard] Loaded ${suspiciousICs.length} suspicious IC(s)`);
     } else {
@@ -1046,9 +1309,84 @@ function openSuspiciousICModal(item) {
     btn.dataset.sessionId = item.session_id;
   });
 
+  // Initialize annotation tool for this modal
+  const imageContainer = modal.querySelector('#suspiciousModalImageContainer');
+  const annotationImage = modal.querySelector('#suspiciousModalImage');
+  const annotateBtn = modal.querySelector('#suspiciousModalAnnotateBtn');
+  
+  if (imageContainer && annotationImage && typeof AnnotationTool !== 'undefined') {
+    // Clean up any existing annotation tool
+    if (window.suspiciousModalAnnotationTool) {
+      window.suspiciousModalAnnotationTool.disable();
+      window.suspiciousModalAnnotationTool = null;
+    }
+    
+    // Wait for image to load before initializing annotation tool
+    annotationImage.onload = function() {
+      // Ensure container has proper positioning
+      if (window.getComputedStyle(imageContainer).position === 'static') {
+        imageContainer.style.position = 'relative';
+      }
+      
+      // Initialize annotation tool
+      if (!imageContainer.id) {
+        imageContainer.id = 'suspiciousModalImageContainer-' + Date.now();
+      }
+      
+      window.suspiciousModalAnnotationTool = new AnnotationTool(annotationImage, imageContainer.id);
+      
+      // Load existing annotations for this session
+      if (item.session_id) {
+        window.suspiciousModalAnnotationTool.loadAnnotations(item.session_id, fullImageUrl);
+      }
+      
+      // Setup annotation button
+      if (annotateBtn) {
+        annotateBtn.onclick = () => {
+          if (!window.suspiciousModalAnnotationTool) return;
+          
+          if (window.suspiciousModalAnnotationTool.enabled) {
+            window.suspiciousModalAnnotationTool.disable();
+            annotateBtn.textContent = '📝 Annotate Image';
+            annotateBtn.classList.remove('active');
+          } else {
+            window.suspiciousModalAnnotationTool.enable();
+            annotateBtn.textContent = '✓ Stop Annotating';
+            annotateBtn.classList.add('active');
+          }
+        };
+      }
+    };
+    
+    // If image already loaded, trigger onload
+    if (annotationImage.complete) {
+      annotationImage.onload();
+    }
+  }
+
   // Show modal
   modal.style.display = 'flex';
 }
+
+/**
+ * Toggle annotation mode in suspicious IC modal
+ */
+function toggleSuspiciousModalAnnotation() {
+  const annotateBtn = document.getElementById('suspiciousModalAnnotateBtn');
+  if (!window.suspiciousModalAnnotationTool || !annotateBtn) return;
+  
+  if (window.suspiciousModalAnnotationTool.enabled) {
+    window.suspiciousModalAnnotationTool.disable();
+    annotateBtn.textContent = '📝 Annotate Image';
+    annotateBtn.classList.remove('active');
+  } else {
+    window.suspiciousModalAnnotationTool.enable();
+    annotateBtn.textContent = '✓ Stop Annotating';
+    annotateBtn.classList.add('active');
+  }
+}
+
+window.toggleSuspiciousModalAnnotation = toggleSuspiciousModalAnnotation;
 
 /**
  * Close suspicious IC modal
@@ -1056,6 +1394,15 @@ function openSuspiciousICModal(item) {
 function closeSuspiciousICModal() {
   const modal = document.getElementById('suspiciousICModal');
   if (modal) {
+    // Disable annotation tool when closing modal
+    if (window.suspiciousModalAnnotationTool) {
+      window.suspiciousModalAnnotationTool.disable();
+      const annotateBtn = modal.querySelector('#suspiciousModalAnnotateBtn');
+      if (annotateBtn) {
+        annotateBtn.textContent = '📝 Annotate Image';
+        annotateBtn.classList.remove('active');
+      }
+    }
     modal.style.display = 'none';
   }
 }

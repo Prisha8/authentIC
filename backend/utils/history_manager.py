@@ -7,6 +7,7 @@ Saves comprehensive processing data for RAG queries and history display
 from pathlib import Path
 import json
 import shutil
+import re
 from datetime import datetime
 from typing import Dict, Optional, List
 from PIL import Image
@@ -131,6 +132,14 @@ class HistoryManager:
                         print(f"[History] Warning: Failed to extract PDF text: {e}")
             
             # 3. Save datasheet
+            # 3b. Save dimension visualization path (relative) if exists
+            if result.dimension_visualization:
+                dim_viz_path = Path(result.dimension_visualization)
+                if dim_viz_path.exists():
+                    try:
+                        saved_paths['dimension_viz'] = str(dim_viz_path.relative_to(self.base_dir))
+                    except ValueError:
+                        saved_paths['dimension_viz'] = dim_viz_path.name
             if result.datasheet_path:
                 datasheet_path_obj = Path(result.datasheet_path)
                 if datasheet_path_obj.exists():
@@ -167,6 +176,10 @@ class HistoryManager:
                     'parsed_specs': result.parsed_specs or {}
                 },
                 'dimension_analysis': result.dimension_analysis or {},
+                'dimension_visualization': result.dimension_visualization,
+                'pin_counter': result.pin_counter or {},
+                'pin_visualization': result.pin_visualization,
+                'histogram_analysis': result.histogram_analysis or {},
                 'visual_comparison': result.visual_comparison or {},
                 'anomalies': result.anomalies or [],
                 'reasoning': getattr(result, 'reasoning', '') or ''
@@ -178,9 +191,16 @@ class HistoryManager:
             
             with open(analysis_dir / "oem_info.json", 'w', encoding='utf-8') as f:
                 json.dump(analysis_data['oem_info'], f, indent=2, ensure_ascii=False)
+
             
             with open(analysis_dir / "dimension_analysis.json", 'w', encoding='utf-8') as f:
                 json.dump(analysis_data['dimension_analysis'], f, indent=2, ensure_ascii=False)
+            
+            with open(analysis_dir / "pin_counter.json", 'w', encoding='utf-8') as f:
+                json.dump(analysis_data['pin_counter'], f, indent=2, ensure_ascii=False)
+            
+            with open(analysis_dir / "histogram_analysis.json", 'w', encoding='utf-8') as f:
+                json.dump(analysis_data['histogram_analysis'], f, indent=2, ensure_ascii=False)
             
             with open(analysis_dir / "visual_comparison.json", 'w', encoding='utf-8') as f:
                 json.dump(analysis_data['visual_comparison'], f, indent=2, ensure_ascii=False)
@@ -212,7 +232,17 @@ class HistoryManager:
                     json.dump(progress_data, f, indent=2, ensure_ascii=False)
             
             # 7. Create RAG index (concatenated searchable content)
-            rag_content = self._create_rag_index(result, analysis_data, session_dir)
+            # Fetch annotations for RAG index
+            annotations = []
+            try:
+                from utils.vector_db import get_vector_db
+                vector_db = get_vector_db()
+                if vector_db:
+                    annotations = vector_db.get_annotations_for_session(session_id)
+            except Exception as e:
+                print(f"[History] Could not fetch annotations: {e}")
+            
+            rag_content = self._create_rag_index(result, analysis_data, session_dir, annotations=annotations)
             rag_index_path = session_dir / "rag_index.json"
             with open(rag_index_path, 'w', encoding='utf-8') as f:
                 json.dump(rag_content, f, indent=2, ensure_ascii=False)
@@ -253,7 +283,7 @@ class HistoryManager:
             return ""
     
     def _create_rag_index(self, result: DetectionResult, analysis_data: Dict, 
-                          session_dir: Path) -> Dict:
+                          session_dir: Path, annotations: Optional[List[Dict]] = None) -> Dict:
         """Create RAG index with concatenated searchable content"""
         sections = {}
         full_text_parts = []
@@ -283,6 +313,7 @@ class HistoryManager:
             dim_text = json.dumps(analysis_data['dimension_analysis'], indent=2)
             sections['dimension_analysis'] = dim_text
             full_text_parts.append(f"Dimension Analysis:\n{dim_text}")
+
         
         # Visual Analysis
         if analysis_data.get('visual_comparison'):
@@ -298,6 +329,25 @@ class HistoryManager:
             ])
             sections['anomalies'] = anomalies_text
             full_text_parts.append(f"Anomalies:\n{anomalies_text}")
+        
+        # Human Annotations
+        if annotations:
+            annotation_text = []
+            for ann in annotations:
+                ann_parts = [f"Label: {ann.get('label', 'Unknown')}"]
+                if ann.get('description'):
+                    ann_parts.append(f"Description: {ann.get('description')}")
+                if ann.get('annotation_type'):
+                    ann_parts.append(f"Type: {ann.get('annotation_type')}")
+                if ann.get('severity'):
+                    ann_parts.append(f"Severity: {ann.get('severity')}")
+                if ann.get('correction_to_ai'):
+                    ann_parts.append("[CORRECTS AI ANALYSIS]")
+                annotation_text.append(" - ".join(ann_parts))
+            
+            if annotation_text:
+                sections['human_annotations'] = "\n".join(annotation_text)
+                full_text_parts.append(f"Human Annotations:\n{sections['human_annotations']}")
         
         # Reasoning
         if analysis_data.get('reasoning'):
@@ -342,27 +392,96 @@ class HistoryManager:
     def _create_metadata(self, result: DetectionResult, session_id: str, 
                         saved_paths: Dict) -> Dict:
         """Create metadata.json for card display"""
-        # Extract COO from IC info if available
+        # Extract COO, date_codes, lot_codes, and other attributes from identify tool output
         coo = "Unknown"
         date_codes = []
         lot_codes = []
+        temperature_grade = None
+        speed_grade = None
+        package_variant = None
         
-        # Try to get from visual_comparison or dimension_analysis
-        if result.visual_comparison:
-            # Check if COO is mentioned in visual comparison
+        # Try to load identify tool output from saved files
+        session_dir = self.history_dir / session_id
+        identify_output_path = session_dir / "analysis" / "tool_outputs" / "identify.json"
+        
+        identify_tool_available = False
+        if identify_output_path.exists():
+            try:
+                with open(identify_output_path, 'r', encoding='utf-8') as f:
+                    identify_data = json.load(f)
+                    # Handle both direct data and wrapped format
+                    identify_result = identify_data.get('data', identify_data)
+                    
+                    # Extract country_codes (COO)
+                    country_codes = identify_result.get('country_codes', [])
+                    identify_tool_available = True
+                    print(f"[History] Loading COO from identify.json for {session_id}")
+                    print(f"[History] Country codes found: {country_codes}")
+                    if country_codes and isinstance(country_codes, list) and len(country_codes) > 0:
+                        # Use first country code found
+                        coo = str(country_codes[0]).upper()
+                        print(f"[History] Using COO from identify tool: {coo}")
+                    else:
+                        print(f"[History] No country codes found in identify tool output (empty list), COO remains: {coo}")
+                    
+                    # Extract date_codes
+                    date_codes_raw = identify_result.get('date_codes', [])
+                    if date_codes_raw and isinstance(date_codes_raw, list):
+                        date_codes = date_codes_raw
+                    
+                    # Extract lot_codes
+                    lot_codes_raw = identify_result.get('lot_codes', [])
+                    if lot_codes_raw and isinstance(lot_codes_raw, list):
+                        lot_codes = lot_codes_raw
+                    
+                    # Extract temperature_grade
+                    temp_grade = identify_result.get('temperature_grade')
+                    if temp_grade:
+                        temperature_grade = str(temp_grade)
+                    
+                    # Extract speed_grade
+                    speed = identify_result.get('speed_grade')
+                    if speed:
+                        speed_grade = str(speed)
+                    
+                    # Extract package_variant
+                    pkg_variant = identify_result.get('package_variant')
+                    if pkg_variant:
+                        package_variant = str(pkg_variant)
+                        
+            except Exception as e:
+                print(f"[History] Warning: Failed to read identify tool output: {e}")
+                identify_tool_available = False
+        else:
+            print(f"[History] Identify tool output not found at {identify_output_path}")
+        
+        # Fallback: Try to get from visual_comparison ONLY if identify tool output was completely unavailable
+        # NOTE: This is unreliable and should only be used as last resort
+        # The visual_comparison text may contain "ph" as part of other words (photo, graph, etc.)
+        # So we need to check for country codes as whole words or with proper context
+        # IMPORTANT: Only use this fallback if identify_output_path didn't exist (not if it existed but had empty country_codes)
+        # If identify tool ran but returned empty country_codes, we should keep COO as "Unknown" rather than guessing
+        if coo == "Unknown" and not identify_tool_available and result.visual_comparison:
+            # Check if COO is mentioned in visual comparison (less reliable)
             visual_text = json.dumps(result.visual_comparison).lower()
-            for country_code in ['ph', 'my', 'cn', 'tw', 'us', 'jp']:
-                if country_code in visual_text:
+            # Use word boundaries or specific patterns to avoid false matches
+            # Check for country codes as standalone words or with proper context
+            # This prevents false matches like "ph" in "photo" or "graph"
+            # Only match if we see explicit country code patterns, not just any occurrence
+            country_patterns = {
+                'ph': r'\bph\b|philippines|country.*ph|coo.*ph|origin.*ph',
+                'my': r'\bmy\b|malaysia|country.*my|coo.*my|origin.*my',
+                'cn': r'\bcn\b|china|chinese|country.*cn|coo.*cn|origin.*cn',
+                'tw': r'\btw\b|taiwan|country.*tw|coo.*tw|origin.*tw',
+                'us': r'\bus\b|usa|united states|country.*us|coo.*us|origin.*us',
+                'jp': r'\bjp\b|japan|japanese|country.*jp|coo.*jp|origin.*jp'
+            }
+            for country_code, pattern in country_patterns.items():
+                if re.search(pattern, visual_text, re.IGNORECASE):
                     coo = country_code.upper()
+                    print(f"[History] WARNING: Using unreliable fallback - Found COO '{coo}' from visual_comparison (pattern matched)")
+                    print(f"[History] This may be incorrect. Identify tool should provide country codes.")
                     break
-        
-        # Extract from additional_info if available
-        if result.additional_info:
-            info_lower = result.additional_info.lower()
-            # Simple extraction - can be enhanced
-            if 'coo' in info_lower or 'country' in info_lower:
-                # Try to extract country code
-                pass
         
         return {
             'session_id': session_id,
@@ -377,9 +496,9 @@ class HistoryManager:
                 'coo': coo,
                 'date_codes': date_codes,
                 'lot_codes': lot_codes,
-                'temperature_grade': None,
-                'speed_grade': None,
-                'package_variant': None
+                'temperature_grade': temperature_grade,
+                'speed_grade': speed_grade,
+                'package_variant': package_variant
             },
             'scores': {
                 'authenticity_score': result.authenticity_score or 0.0,
@@ -410,6 +529,85 @@ class HistoryManager:
                     try:
                         with open(metadata_path, 'r', encoding='utf-8') as f:
                             metadata = json.load(f)
+                            
+                            # CRITICAL FIX: Override COO with identify tool output if available
+                            # The metadata might have wrong COO (PH) from fallback, but identify tool has correct one
+                            session_id = session_dir.name
+                            try:
+                                identify_output_path = session_dir / "analysis" / "tool_outputs" / "identify.json"
+                                if identify_output_path.exists():
+                                    with open(identify_output_path, 'r', encoding='utf-8') as id_f:
+                                        identify_data = json.load(id_f)
+                                        identify_result = identify_data.get('data', identify_data)
+                                        country_codes = identify_result.get('country_codes', [])
+                                        
+                                        # First try country_codes array
+                                        correct_coo = None
+                                        if country_codes and isinstance(country_codes, list) and len(country_codes) > 0:
+                                            correct_coo = str(country_codes[0]).upper()
+                                        
+                                        # If no country_codes, try to extract from additional_markings, lot_codes, or part_number text
+                                        if not correct_coo or correct_coo == 'UNKNOWN':
+                                            # Collect all text fields that might contain country codes
+                                            all_text_parts = []
+                                            
+                                            # From additional_markings
+                                            additional_markings = identify_result.get('additional_markings', [])
+                                            for m in additional_markings:
+                                                if isinstance(m, dict):
+                                                    all_text_parts.append(str(m.get('text', '')))
+                                                    all_text_parts.append(str(m.get('decoded', '')))
+                                            
+                                            # From lot_codes (often contains country codes like "CHN GQ 912" or "MYS 99 130")
+                                            lot_codes = identify_result.get('lot_codes', [])
+                                            for lot in lot_codes:
+                                                if isinstance(lot, dict):
+                                                    all_text_parts.append(str(lot.get('raw', '')))
+                                                    all_text_parts.append(str(lot.get('meaning', '')))
+                                                    all_text_parts.append(str(lot.get('location', '')))  # Location often mentions country codes
+                                                else:
+                                                    all_text_parts.append(str(lot))
+                                            
+                                            # From part_number
+                                            all_text_parts.append(str(identify_result.get('part_number', '')))
+                                            
+                                            # From reasoning (sometimes contains full text description)
+                                            all_text_parts.append(str(identify_result.get('reasoning', '')))
+                                            
+                                            # Combine all text
+                                            all_text = ' '.join(all_text_parts).upper()
+                                            
+                                            # Look for country codes in text (CHN, MYS, TW, etc.)
+                                            # Priority order: CHN > MYS > TW > others (to avoid false matches)
+                                            country_patterns = [
+                                                ('CHN', r'\bCHN\b'),
+                                                ('MYS', r'\bMYS\b'),
+                                                ('TW', r'\bTW\b'),
+                                                ('MY', r'\bMY\b(?!S)'),  # MY but not MYS
+                                                ('CN', r'\bCN\b(?!H)'),  # CN but not CHN
+                                                ('PH', r'\bPH\b'),
+                                                ('US', r'\bUS\b(?!A)'),  # US but not USA
+                                                ('JP', r'\bJP\b')
+                                            ]
+                                            
+                                            for code, pattern in country_patterns:
+                                                if re.search(pattern, all_text):
+                                                    correct_coo = code
+                                                    print(f"[History] Extracted COO from text for {session_id}: {correct_coo} (from: {all_text[:80]})")
+                                                    break
+                                        
+                                        if correct_coo and correct_coo != 'UNKNOWN':
+                                            # Update COO in ic_info
+                                            if 'ic_info' not in metadata:
+                                                metadata['ic_info'] = {}
+                                            old_coo = metadata.get('ic_info', {}).get('coo', 'Unknown')
+                                            metadata['ic_info']['coo'] = correct_coo
+                                            if old_coo != correct_coo:
+                                                print(f"[History] Fixed COO for {session_id}: {old_coo} -> {correct_coo}")
+                            except Exception as e:
+                                # Don't fail if we can't load identify output, just use metadata COO
+                                pass
+                            
                             history_list.append(metadata)
                     except Exception as e:
                         print(f"[History] Error loading metadata from {session_dir}: {e}")
@@ -474,6 +672,7 @@ class HistoryManager:
             if analysis_dir.exists():
                 detail['analysis'] = {}
                 for analysis_file in ['ic_details.json', 'oem_info.json', 'dimension_analysis.json', 
+                                     'pin_counter.json', 'histogram_analysis.json',
                                      'visual_comparison.json', 'anomalies.json', 'reasoning.json']:
                     analysis_path = analysis_dir / analysis_file
                     if analysis_path.exists():

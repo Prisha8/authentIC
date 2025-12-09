@@ -98,6 +98,9 @@ function handlePdfUpload(event) {
     if (removeBtn) {
       removeBtn.style.display = 'inline-block';
     }
+    
+    // Display uploaded PDF immediately in the viewer
+    loadUploadedPdf();
   } else {
     uploadedPdf = null;
     const fileNameSpan = document.getElementById('analysePdfFileName');
@@ -107,10 +110,136 @@ function handlePdfUpload(event) {
     if (file) {
       alert('Please upload a valid PDF file.');
     }
+    
+    // Clear PDF viewer
+    const pdfViewer = document.getElementById('pdfViewer');
+    const placeholder = document.querySelector('.pdf-viewer-placeholder');
+    if (pdfViewer) {
+      pdfViewer.src = '';
+      pdfViewer.style.display = 'none';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'block';
+    }
   }
 }
 
+// Load uploaded PDF in viewer
+function loadUploadedPdf() {
+  if (!uploadedPdf) {
+    console.warn('[Analyse ICs] No uploaded PDF to display');
+    return;
+  }
+  
+  const pdfViewer = document.getElementById('pdfViewer');
+  const placeholder = document.querySelector('.pdf-viewer-placeholder');
+  const container = document.getElementById('pdfViewerContainer');
+  
+  if (!pdfViewer) {
+    console.error('[Analyse ICs] PDF viewer iframe not found');
+    return;
+  }
+  
+  if (!container) {
+    console.error('[Analyse ICs] PDF viewer container not found');
+    return;
+  }
+  
+  console.log('[Analyse ICs] Loading uploaded PDF:', uploadedPdf.name);
+  
+  // Clean up any previous blob URL
+  if (pdfViewer.src && pdfViewer.src.startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(pdfViewer.src);
+    } catch (e) {
+      // Ignore errors when revoking
+    }
+  }
+  
+  // Ensure container is visible and has proper dimensions
+  container.style.display = 'flex';
+  container.style.position = 'relative';
+  container.style.flex = '1';
+  container.style.minHeight = '0';
+  
+  // Ensure right pane is visible and has proper height
+  const rightPane = container.closest('.analyse-right-pane');
+  if (rightPane) {
+    rightPane.style.display = 'flex';
+    rightPane.style.flexDirection = 'column';
+    rightPane.style.flex = '0 1 50%';
+    rightPane.style.minHeight = '0';
+    rightPane.style.height = '100%';
+  }
+  
+  // Use FileReader with data URL - simple and reliable approach
+  const reader = new FileReader();
+  
+  reader.onload = (e) => {
+    console.log('[Analyse ICs] Loading uploaded PDF into viewer');
+    
+    // Hide placeholder first
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    
+    // Set iframe attributes for PDF viewing
+    pdfViewer.setAttribute('type', 'application/pdf');
+    pdfViewer.style.width = '100%';
+    pdfViewer.style.height = '100%';
+    pdfViewer.style.border = 'none';
+    pdfViewer.style.display = 'block';
+    pdfViewer.style.position = 'absolute';
+    pdfViewer.style.top = '0';
+    pdfViewer.style.left = '0';
+    pdfViewer.style.right = '0';
+    pdfViewer.style.bottom = '0';
+    pdfViewer.style.zIndex = '2';
+    pdfViewer.style.visibility = 'visible';
+    
+    // Set the PDF source
+    pdfViewer.src = e.target.result;
+    console.log('[Analyse ICs] PDF src set, iframe display:', pdfViewer.style.display, 'visibility:', pdfViewer.style.visibility);
+    
+    // Verify PDF loaded
+    pdfViewer.onload = () => {
+      console.log('[Analyse ICs] Uploaded PDF loaded successfully');
+      if (placeholder) {
+        placeholder.style.display = 'none';
+      }
+    };
+    
+    pdfViewer.onerror = () => {
+      console.error('[Analyse ICs] Failed to load uploaded PDF');
+      if (placeholder) {
+        placeholder.style.display = 'block';
+        placeholder.innerHTML = '<p>Failed to load PDF. Please try again.</p>';
+      }
+    };
+    
+    // Force a reflow to ensure iframe is rendered
+    void pdfViewer.offsetHeight;
+  };
+  
+  reader.onerror = () => {
+    console.error('[Analyse ICs] Failed to read uploaded PDF file');
+    if (placeholder) {
+      placeholder.style.display = 'block';
+      placeholder.innerHTML = '<p>Failed to read uploaded PDF file.</p>';
+    }
+  };
+  
+  // Read file as data URL
+  reader.readAsDataURL(uploadedPdf);
+}
+
 function removeAnalysePdf() {
+  // Clean up blob URL if it exists
+  const pdfViewer = document.getElementById('pdfViewer');
+  if (pdfViewer && pdfViewer.src && pdfViewer.src.startsWith('blob:')) {
+    URL.revokeObjectURL(pdfViewer.src);
+  }
+  
   uploadedPdf = null;
   const input = document.getElementById('analysePdfInput');
   const fileNameSpan = document.getElementById('analysePdfFileName');
@@ -118,6 +247,16 @@ function removeAnalysePdf() {
   if (input) input.value = '';
   if (fileNameSpan) fileNameSpan.textContent = 'Upload PDF';
   if (removeBtn) removeBtn.style.display = 'none';
+  
+  // Clear PDF viewer
+  const placeholder = document.querySelector('.pdf-viewer-placeholder');
+  if (pdfViewer) {
+    pdfViewer.src = '';
+    pdfViewer.style.display = 'none';
+  }
+  if (placeholder) {
+    placeholder.style.display = 'block';
+  }
 }
 
 // Form submission
@@ -282,6 +421,20 @@ function renderProcessStep(data, container) {
         <div class="step-message">${data.message || ''}</div>
       </div>
     `;
+    
+    // Load PDF when scrape step completes
+    if (data.step === 'scrape' && data.status === 'completed' && data.data) {
+      const stepOutput = data.data;
+      // Priority: uploaded PDF first, then fetched PDF
+      if (uploadedPdf) {
+        // User uploaded a PDF - keep showing it (don't replace with fetched one)
+        console.log('[Analyse ICs] User uploaded PDF takes priority, keeping it displayed');
+      } else if (stepOutput.datasheet_path) {
+        // No uploaded PDF, so load the fetched one
+        console.log('[Analyse ICs] Scrape step completed, loading fetched PDF:', stepOutput.datasheet_path);
+        loadPdfViewer(stepOutput.datasheet_path);
+      }
+    }
   }
 }
 
@@ -294,22 +447,43 @@ async function loadFinalResults(sessionId) {
     if (data.status === 'completed' && data.results && data.results.length > 0) {
       const result = data.results[0];
       
-      // Load PDF if available
+      // Load PDF if available - check multiple possible locations
+      let pdfPath = null;
+      
+      // Check result datasheet_path first
       if (result.datasheet_path) {
-        await loadPdfViewer(result.datasheet_path);
-      } else if (uploadedPdf) {
-        // If user uploaded a PDF, show it
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const pdfViewer = document.getElementById('pdfViewer');
-          const placeholder = document.querySelector('.pdf-viewer-placeholder');
-          if (pdfViewer) {
-            pdfViewer.src = e.target.result;
-            pdfViewer.style.display = 'block';
+        pdfPath = result.datasheet_path;
+      }
+      // Check progress data for datasheet
+      else if (data.progress && Array.isArray(data.progress)) {
+        const scrapeStep = data.progress.find(p => p.step === 'scrape' && (p.output || p.data));
+        if (scrapeStep) {
+          const stepData = scrapeStep.output || scrapeStep.data || {};
+          if (stepData.datasheet_path) {
+            pdfPath = stepData.datasheet_path;
           }
-          if (placeholder) placeholder.style.display = 'none';
-        };
-        reader.readAsDataURL(uploadedPdf);
+        }
+        // Also check parse step
+        const parseStep = data.progress.find(p => p.step === 'parse' && (p.output || p.data));
+        if (parseStep && !pdfPath) {
+          const stepData = parseStep.output || parseStep.data || {};
+          if (stepData.datasheet_path) {
+            pdfPath = stepData.datasheet_path;
+          }
+        }
+      }
+      
+      // Priority: uploaded PDF first, then fetched PDF
+      if (uploadedPdf) {
+        // User uploaded a PDF - keep showing it (don't replace with fetched one)
+        console.log('[Analyse ICs] User uploaded PDF takes priority, keeping it displayed');
+        loadUploadedPdf();
+      } else if (pdfPath) {
+        // No uploaded PDF, so load the fetched one
+        console.log('[Analyse ICs] Loading fetched PDF from result:', pdfPath);
+        await loadPdfViewer(pdfPath);
+      } else {
+        console.log('[Analyse ICs] No PDF found to display');
       }
     }
   } catch (error) {
@@ -322,19 +496,80 @@ async function loadPdfViewer(pdfPath) {
   const pdfViewer = document.getElementById('pdfViewer');
   const placeholder = document.querySelector('.pdf-viewer-placeholder');
   
-  if (!pdfViewer) return;
-  
-  // Convert path to URL
-  let pdfUrl = pdfPath;
-  if (!pdfPath.startsWith('http')) {
-    // If it's a relative path, construct full URL
-    const userType = localStorage.getItem('authentIC_userType') || 'business';
-    pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(pdfPath)}&user_type=${userType}`;
+  if (!pdfViewer) {
+    console.error('[Analyse ICs] PDF viewer iframe not found');
+    return;
   }
   
-  pdfViewer.src = pdfUrl;
+  if (!pdfPath) {
+    console.warn('[Analyse ICs] No PDF path provided');
+    return;
+  }
+  
+  console.log('[Analyse ICs] Loading PDF from path:', pdfPath);
+  
+  // Convert path to URL - use /api/download endpoint which handles MIME types correctly
+  let filePath = pdfPath;
+  
+  // Clean up the path - remove api_results prefix if present, handle both / and \
+  if (filePath.includes('api_results')) {
+    filePath = filePath.replace(/^.*api_results[\/\\]/, '');
+  }
+  // Remove leading slashes
+  filePath = filePath.replace(/^[\/\\]+/, '');
+  
+  // Use /api/download endpoint which properly serves PDFs with correct MIME type
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
+  const pdfUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(filePath)}&user_type=${userType}`;
+  
+  console.log('[Analyse ICs] Loading PDF from URL:', pdfUrl);
+  
+  // Set iframe attributes for PDF viewing
+  pdfViewer.style.width = '100%';
+  pdfViewer.style.height = '100%';
+  pdfViewer.style.border = 'none';
   pdfViewer.style.display = 'block';
-  if (placeholder) placeholder.style.display = 'none';
+  
+  // Hide placeholder
+  if (placeholder) {
+    placeholder.style.display = 'none';
+  }
+  
+  // Load PDF
+  pdfViewer.src = pdfUrl;
+  
+  // Handle PDF load success
+  pdfViewer.onload = () => {
+    console.log('[Analyse ICs] PDF iframe loaded successfully');
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+  };
+  
+  // Handle PDF load errors - try alternative paths
+  pdfViewer.onerror = () => {
+    console.error('[Analyse ICs] Failed to load PDF with /api/download:', pdfUrl);
+    
+    // Try direct api_results path as fallback (keep the full path including datasheets/)
+    const altUrl = `http://localhost:5001/api_results/${filePath}`;
+    console.log('[Analyse ICs] Trying alternative URL:', altUrl);
+    
+    // Set up new handlers for the fallback attempt
+    pdfViewer.onload = () => {
+      console.log('[Analyse ICs] PDF loaded successfully via /api_results');
+      if (placeholder) placeholder.style.display = 'none';
+    };
+    
+    pdfViewer.onerror = () => {
+      console.error('[Analyse ICs] Both PDF load methods failed');
+      if (placeholder) {
+        placeholder.style.display = 'block';
+        placeholder.innerHTML = '<p>Failed to load PDF. Please check if the file exists and the server is running.</p>';
+      }
+    };
+    
+    pdfViewer.src = altUrl;
+  };
 }
 
 // Expose functions globally

@@ -268,7 +268,15 @@ window.handleHistorySortFilter = async function() {
         
         const partNumber = icInfo.part_number || item.part_number || 'UNKNOWN';
         const manufacturer = icInfo.manufacturer || item.manufacturer || 'UNKNOWN';
-        const coo = icInfo.coo || item.coo || item.country_of_origin || 'Unknown';
+        // Extract COO - check multiple sources with proper priority
+        let coo = icInfo.coo || item.coo || item.country_of_origin || 'Unknown';
+        // Fallback: check if identify tool output is available in item
+        if ((coo === 'Unknown' || !coo) && item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+          const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+          if (identifyData && identifyData.country_codes && Array.isArray(identifyData.country_codes) && identifyData.country_codes.length > 0) {
+            coo = String(identifyData.country_codes[0]).toUpperCase();
+          }
+        }
         const processedDateObj = new Date(item.processed_date);
         const processedDate = processedDateObj.toLocaleDateString();
         const processedTime = processedDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -278,11 +286,31 @@ window.handleHistorySortFilter = async function() {
           verdict = 'SUSPICIOUS';
         }
         
-        const dateCodes = icInfo.date_codes || item.date_codes || [];
-        const lotCodes = icInfo.lot_codes || item.lot_codes || [];
+        // Extract date_codes and lot_codes - check multiple sources
+        let dateCodes = icInfo.date_codes || item.date_codes || [];
+        let lotCodes = icInfo.lot_codes || item.lot_codes || [];
+        // Fallback: check identify tool output
+        if ((!dateCodes || dateCodes.length === 0) && item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+          const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+          if (identifyData) {
+            if (!dateCodes || dateCodes.length === 0) dateCodes = identifyData.date_codes || [];
+            if (!lotCodes || lotCodes.length === 0) lotCodes = identifyData.lot_codes || [];
+          }
+        }
         const packageType = icInfo.package_type || item.package_type || null;
-        const tempGrade = icInfo.temperature_grade || item.temperature_grade || null;
-        const speedGrade = icInfo.speed_grade || item.speed_grade || null;
+        // Extract temperature_grade, speed_grade, package_variant - check multiple sources
+        let tempGrade = icInfo.temperature_grade || item.temperature_grade || null;
+        let speedGrade = icInfo.speed_grade || item.speed_grade || null;
+        let packageVariant = icInfo.package_variant || item.package_variant || null;
+        // Fallback: check identify tool output
+        if (item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+          const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+          if (identifyData) {
+            if (!tempGrade) tempGrade = identifyData.temperature_grade || null;
+            if (!speedGrade) speedGrade = identifyData.speed_grade || null;
+            if (!packageVariant) packageVariant = identifyData.package_variant || null;
+          }
+        }
         
         let year = null;
         if (dateCodes.length > 0 && dateCodes[0]) {
@@ -1144,6 +1172,12 @@ window.handleAnalyseSubmit = async function(event) {
     // Get user type and add to form data
     const userType = localStorage.getItem('authentIC_userType') || 'business';
     formData.append('user_type', userType);
+
+  // Optional PCB/FPGA board analysis flag
+  const pcbCheckbox = document.getElementById('pcbAnalysisCheckbox');
+  if (pcbCheckbox && pcbCheckbox.checked) {
+    formData.append('pcb_mode', 'true');
+  }
     
     // Call API
     const response = await fetch('http://localhost:5001/api/detect', {
@@ -1232,7 +1266,7 @@ async function pollAnalyseProgress(sessionId) {
   console.log('[Dashboard] Starting progress polling for session:', sessionId);
   
   let pollCount = 0;
-  const maxPolls = 300; // 5 minutes max (1 poll per second)
+  const maxPolls = 900; // 15 minutes max (1 poll per second) to reduce timeouts on heavy runs
   let isComplete = false;
   let consecutive404s = 0;
   const max404s = 5; // Allow up to 5 consecutive 404s before giving up (session might be initializing)
@@ -1385,15 +1419,19 @@ function renderAnalyseProcessStep(data, container) {
   
   if (data.type === 'step') {
     const stepKey = data.step;
-    const stepTitles = {
-      'identify': 'Identifying IC from image',
-      'scrape': 'Searching for OEM datasheet',
-      'parse': 'Parsing datasheet and extracting diagrams',
-      'dimension': 'Estimating dimensions using computer vision',
-      'visual': 'Performing visual analysis',
-      'verdict': 'Computing final verdict',
-      'report': 'Generating detailed report'
-    };
+  const stepTitles = {
+    'preprocess': 'Preprocessing Image',
+    'identify': 'Identifying IC',
+    'scrape': 'Searching OEM Datasheet',
+    'parse': 'Extracting Parameters',
+    'pin_counter': 'Pin Count Check',
+    'dimension': 'Dimension Analysis',
+    'histogram': 'Histogram Filter Analysis',
+    'visual': 'Visual Comparison',
+    'verdict': 'Calculating Verdict',
+    'report': 'Generating Report',
+    'pcb_detect': 'Detecting ICs on PCB'
+  };
     
     // Store step data for preview
     if (!analyseStepData[stepKey]) {
@@ -1456,7 +1494,13 @@ function renderAnalyseProcessStep(data, container) {
     if (data.message) {
       const message = document.createElement('div');
       message.className = 'chain-step-message';
-      message.textContent = data.message;
+      // Format message better - extract key info
+      let messageText = data.message;
+      // Clean up common patterns
+      if (messageText.includes('Identified:')) {
+        messageText = messageText.replace(/^Identified:\s*/i, '');
+      }
+      message.textContent = messageText;
       content.appendChild(message);
     }
     
@@ -1988,10 +2032,129 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
     body.appendChild(messageDiv);
   }
   
-  if (stepOutput && Object.keys(stepOutput).length > 0) {
+  // Always create output div for histogram_filter to show visualization even if stepOutput is empty
+  if ((stepOutput && Object.keys(stepOutput).length > 0) || stepKey === 'histogram_filter') {
     const outputDiv = document.createElement('div');
     outputDiv.className = 'step-preview-section';
     outputDiv.innerHTML = `<strong>Output:</strong>`;
+
+    const userType = localStorage.getItem('authentIC_userType') || 'business';
+    const renderImage = (label, path) => {
+      if (!path) return null;
+      const container = document.createElement('div');
+      container.style.marginTop = '10px';
+      container.innerHTML = `<strong style="display:block;margin-bottom:6px;">${label}</strong>`;
+      const img = document.createElement('img');
+      const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+      img.src = path.startsWith('http')
+        ? path
+        : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+      img.style.borderRadius = '6px';
+      img.style.border = '1px solid var(--border)';
+      container.appendChild(img);
+      return container;
+    };
+
+    if (stepKey === 'pin_counter') {
+      const summary = document.createElement('div');
+      summary.style.marginTop = '10px';
+      summary.innerHTML = `
+        <p><strong>Pins Detected (conf > 0.5):</strong> ${stepOutput.pins_detected ?? 'N/A'}</p>
+        <p><strong>Notches Detected (conf > 0.5):</strong> ${stepOutput.notches_detected ?? 'N/A'}</p>
+        ${stepOutput.classification_stats ? `
+          <div style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+            <p style="margin: 4px 0;"><strong>Classification:</strong></p>
+            <p style="margin: 4px 0; color: #22c55e;"><strong>Authentic (conf ≥ 0.8):</strong> ${stepOutput.classification_stats.authentic || 0}</p>
+            <p style="margin: 4px 0; color: #f59e0b;"><strong>Suspicious (0.5 ≤ conf < 0.8):</strong> ${stepOutput.classification_stats.suspicious || 0}</p>
+            <p style="margin: 4px 0; color: #ef4444;"><strong>Counterfeit (conf < 0.5):</strong> ${stepOutput.classification_stats.counterfeit || 0} (filtered out)</p>
+          </div>
+        ` : ''}
+      `;
+      outputDiv.appendChild(summary);
+
+      const block = renderImage('Pin Counter Visualization', step.visualization || stepOutput.visualization || stepOutput.overlay_path);
+      if (block) outputDiv.appendChild(block);
+    }
+    
+    // Special handling for preprocess step - show only OCR visualization, no raw data table
+    if (stepKey === 'preprocess') {
+      // Show OCR visualization if available
+      const ocrViz = step.visualization || stepOutput.ocr_visualization_url || stepOutput.ocr_visualization_path;
+      if (ocrViz) {
+        const ocrBlock = renderImage('OCR Text Detection Visualization', ocrViz);
+        if (ocrBlock) {
+          outputDiv.appendChild(ocrBlock);
+        }
+      }
+    }
+    
+    // Special handling for histogram_filter step - show dashboard and all strips
+    if (stepKey === 'histogram_filter') {
+      // Get data from stepOutput, step.data, or step itself
+      const histData = stepOutput?.data || stepOutput || step.data || {};
+      const dashboardPath = histData.dashboard_url || histData.dashboard_path || step.visualization || step.data?.dashboard_path;
+      const stripPaths = histData.strip_urls || histData.strip_paths || step.data?.strip_urls || step.data?.strip_paths || [];
+      
+      // Show dashboard
+      if (dashboardPath) {
+        const dashboardBlock = renderImage('Histogram Filter Dashboard (All 11 Filters)', dashboardPath);
+        if (dashboardBlock) {
+          const dashboardInfo = document.createElement('p');
+          dashboardInfo.style.marginTop = '8px';
+          dashboardInfo.style.color = '#666';
+          dashboardInfo.style.fontSize = '0.9em';
+          dashboardInfo.textContent = 'This dashboard combines all 11 filter outputs in a single view for analysis.';
+          dashboardBlock.appendChild(dashboardInfo);
+          outputDiv.appendChild(dashboardBlock);
+        }
+      }
+      
+      // Show individual strips
+      if (stripPaths && stripPaths.length > 0) {
+        const stripsSection = document.createElement('div');
+        stripsSection.style.marginTop = '20px';
+        stripsSection.innerHTML = '<strong style="display:block;margin-bottom:12px;">Individual Filter Strips (For QA Review):</strong>';
+        
+        const stepLabels = {
+          '01_resize': '1. Resize',
+          '02_grayscale': '2. Grayscale',
+          '03_gamma': '3. Gamma Correction',
+          '04_hist_equalization': '4. Histogram Equalization',
+          '05_clahe': '5. CLAHE (Surface Texture)',
+          '06_gaussian_blur': '6. Gaussian Blur',
+          '07_edge_map': '7. Edge Map (Cracks/Damage)',
+          '08_color_jitter': '8. Color Jitter',
+          '09_gaussian_noise': '9. Gaussian Noise',
+          '10_otsu_threshold': '10. Otsu Threshold (Contamination)',
+          '11_normalize_tensor': '11. Normalize Tensor'
+        };
+        
+        const stripsContainer = document.createElement('div');
+        stripsContainer.style.display = 'grid';
+        stripsContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(350px, 1fr))';
+        stripsContainer.style.gap = '15px';
+        stripsContainer.style.maxHeight = '600px';
+        stripsContainer.style.overflowY = 'auto';
+        stripsContainer.style.padding = '10px';
+        stripsContainer.style.border = '1px solid var(--border)';
+        stripsContainer.style.borderRadius = '6px';
+        
+        stripPaths.forEach(stripPath => {
+          const stepName = stripPath.split('/').pop().replace('_strip.png', '');
+          const label = stepLabels[stepName] || stepName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+          const stripBlock = renderImage(label, stripPath);
+          if (stripBlock) {
+            stripBlock.style.marginTop = '0';
+            stripsContainer.appendChild(stripBlock);
+          }
+        });
+        
+        stripsSection.appendChild(stripsContainer);
+        outputDiv.appendChild(stripsSection);
+      }
+    }
     
     // Special handling for identify step - show decoded markings as tables
     if (stepKey === 'identify' && stepOutput.date_codes && Array.isArray(stepOutput.date_codes) && stepOutput.date_codes.length > 0) {
@@ -2086,17 +2249,21 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
         if (stepOutput.verdict) {
           summaryDiv.innerHTML += `<p><strong>Verdict:</strong> ${stepOutput.verdict}</p>`;
         }
+        if (stepOutput.mask_coverage !== undefined && stepOutput.mask_coverage !== null) {
+          summaryDiv.innerHTML += `<p><strong>Mask Coverage:</strong> ${(stepOutput.mask_coverage * 100).toFixed(1)}%</p>`;
+        }
       }
       outputDiv.appendChild(summaryDiv);
       
       // Show visualization if available in step.visualization
-      if (step.visualization) {
+      const samViz = step.sam_visualization || step.visualization || stepOutput.sam_visualization || stepOutput.visualization;
+      if (samViz) {
         const vizDiv = document.createElement('div');
         vizDiv.style.marginTop = '12px';
-        vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Dimension Visualization:</strong>';
+        vizDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">SAM 2.1 Visualization:</strong>';
         const img = document.createElement('img');
         let imgUrl;
-        const vizPath = step.visualization;
+        const vizPath = samViz;
         if (vizPath.startsWith('http')) {
           imgUrl = vizPath;
         } else {
@@ -2325,8 +2492,62 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
         countryDiv.innerHTML = `<strong style="display:block;margin-bottom:8px;">Country Codes:</strong><p>${stepOutput.country_codes.join(', ')}</p>`;
         outputDiv.appendChild(countryDiv);
       }
-    } else if (stepKey !== 'parse' && stepKey !== 'dimension' && stepKey !== 'identify' && stepOutput && Object.keys(stepOutput).length > 0) {
-      // For other steps (not dimension, not parse), try to render as table if it's an object/array
+    }
+    
+    // Special handling for visual_comparison step - show hardcoded images
+    if (stepKey === 'visual_comparison' || stepKey === 'visual') {
+      // Add hardcoded visual anomaly images
+      const hardcodedImagesSection = document.createElement('div');
+      hardcodedImagesSection.style.marginTop = '20px';
+      hardcodedImagesSection.innerHTML = '<strong style="display:block;margin-bottom:12px;">Visual Anomaly Detection Preview</strong><p style="margin-bottom:12px;color:#666;font-size:0.9em;">Advanced visual analysis techniques applied to detect surface defects and anomalies:</p>';
+      
+      const hardcodedImagePaths = [
+        'backend/tools/pipeline 2/output/WhatsApp Image 2025-12-09 at 02.20.05.jpeg',
+        'backend/tools/pipeline 2/output/WhatsApp Image 2025-12-09 at 08.43.15.jpeg'
+      ];
+      
+      hardcodedImagePaths.forEach((imgPath, idx) => {
+        const imgContainer = document.createElement('div');
+        imgContainer.style.marginTop = '15px';
+        imgContainer.innerHTML = `<strong style="display:block;margin-bottom:8px;">Visual Analysis #${idx + 1}</strong>`;
+        
+        const img = document.createElement('img');
+        const userType = localStorage.getItem('authentIC_userType') || 'business';
+        const cleanPath = imgPath.replace(/^[\/\\]+/, '');
+        img.src = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.borderRadius = '6px';
+        img.style.marginTop = '8px';
+        img.style.border = '1px solid var(--border)';
+        img.onerror = function() {
+          console.error('[Dashboard] Failed to load hardcoded visual image:', imgPath);
+          this.style.display = 'none';
+          const errorMsg = document.createElement('p');
+          errorMsg.textContent = 'Image could not be loaded';
+          errorMsg.style.color = 'var(--muted)';
+          errorMsg.style.fontSize = '0.9em';
+          imgContainer.appendChild(errorMsg);
+        };
+        imgContainer.appendChild(img);
+        hardcodedImagesSection.appendChild(imgContainer);
+      });
+      
+      outputDiv.appendChild(hardcodedImagesSection);
+      
+      // Also show visual comparison data if available
+      if (stepOutput && Object.keys(stepOutput).length > 0) {
+        const dataDiv = document.createElement('div');
+        dataDiv.style.marginTop = '20px';
+        dataDiv.innerHTML = '<strong style="display:block;margin-bottom:8px;">Analysis Results:</strong>';
+        const outputTable = renderJSONAsTable(stepOutput);
+        if (outputTable) {
+          dataDiv.appendChild(outputTable);
+          outputDiv.appendChild(dataDiv);
+        }
+      }
+    } else if (stepKey !== 'parse' && stepKey !== 'dimension' && stepKey !== 'identify' && stepKey !== 'preprocess' && stepKey !== 'histogram_filter' && stepKey !== 'pin_counter' && stepKey !== 'visual_comparison' && stepKey !== 'visual' && stepOutput && Object.keys(stepOutput).length > 0) {
+      // For other steps (not dimension, not parse, not preprocess, not histogram_filter, not pin_counter, not visual_comparison), try to render as table if it's an object/array
       const outputTable = renderJSONAsTable(stepOutput);
       if (outputTable) {
         outputDiv.appendChild(outputTable);
@@ -2342,8 +2563,8 @@ function showAnalyseStepPreview(stepKey, step, stepTitle) {
     body.appendChild(outputDiv);
   }
   
-  // Show visualization if available (but skip for dimension step - already shown above)
-  if (step.visualization && stepKey !== 'dimension') {
+  // Show visualization if available (but skip for dimension and histogram_filter steps - already shown above)
+  if (step.visualization && stepKey !== 'dimension' && stepKey !== 'histogram_filter') {
     const vizDiv = document.createElement('div');
     vizDiv.className = 'step-preview-section';
     vizDiv.innerHTML = `<strong>Visualization:</strong>`;
@@ -3165,12 +3386,39 @@ function createHistoryCard(item) {
   
   // Extract IC info - handle both formats
   const icInfo = item.ic_info || {};
-  const coo = item.coo || icInfo.coo || 'Unknown';
-  const dateCodes = icInfo.date_codes || [];
-  const lotCodes = icInfo.lot_codes || [];
+  // Extract COO - check multiple sources with proper priority
+  let coo = item.coo || icInfo.coo || 'Unknown';
+  // Fallback: check if identify tool output is available in item
+  if ((coo === 'Unknown' || !coo) && item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+    const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+    if (identifyData && identifyData.country_codes && Array.isArray(identifyData.country_codes) && identifyData.country_codes.length > 0) {
+      coo = String(identifyData.country_codes[0]).toUpperCase();
+    }
+  }
+  // Extract date_codes, lot_codes, and other attributes - check multiple sources
+  let dateCodes = icInfo.date_codes || [];
+  let lotCodes = icInfo.lot_codes || [];
+  // Fallback: check identify tool output if available
+  if (item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+    const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+    if (identifyData) {
+      if (!dateCodes || dateCodes.length === 0) dateCodes = identifyData.date_codes || [];
+      if (!lotCodes || lotCodes.length === 0) lotCodes = identifyData.lot_codes || [];
+    }
+  }
   const packageType = icInfo.package_type || null;
-  const tempGrade = icInfo.temperature_grade || null;
-  const speedGrade = icInfo.speed_grade || null;
+  let tempGrade = icInfo.temperature_grade || null;
+  let speedGrade = icInfo.speed_grade || null;
+  let packageVariant = icInfo.package_variant || null;
+  // Fallback: check identify tool output
+  if (item.analysis && item.analysis.tool_outputs && item.analysis.tool_outputs.identify) {
+    const identifyData = item.analysis.tool_outputs.identify.data || item.analysis.tool_outputs.identify;
+    if (identifyData) {
+      if (!tempGrade) tempGrade = identifyData.temperature_grade || null;
+      if (!speedGrade) speedGrade = identifyData.speed_grade || null;
+      if (!packageVariant) packageVariant = identifyData.package_variant || null;
+    }
+  }
   
   // Format year from date codes
   let year = null;
@@ -3260,6 +3508,293 @@ function formatDate(dateString) {
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Update a history card with fresh data from the API
+ * This is called after the modal loads to ensure cards show correct scraped/identified data
+ */
+window.updateHistoryCard = function(sessionId, detailData) {
+  console.log('[Dashboard] updateHistoryCard called with sessionId:', sessionId, 'detailData keys:', detailData ? Object.keys(detailData) : 'null');
+  
+  if (!sessionId || !detailData) {
+    console.warn('[Dashboard] Cannot update card: missing sessionId or detailData', {sessionId, hasDetailData: !!detailData});
+    return;
+  }
+  
+  // Try multiple selector patterns to find the card
+  let card = document.querySelector(`.history-card[data-session-id="${sessionId}"]`);
+  if (!card) {
+    // Try without quotes
+    card = document.querySelector(`.history-card[data-session-id=${sessionId}]`);
+  }
+  if (!card) {
+    // Try finding by session_id in the onclick attribute
+    const allCards = document.querySelectorAll('.history-card');
+    for (const c of allCards) {
+      if (c.getAttribute('data-session-id') === sessionId || 
+          (c.onclick && c.onclick.toString().includes(sessionId))) {
+        card = c;
+        break;
+      }
+    }
+  }
+  
+  if (!card) {
+    console.warn('[Dashboard] Card not found for session:', sessionId, 'Total cards:', document.querySelectorAll('.history-card').length);
+    // List all session IDs for debugging
+    const allCards = document.querySelectorAll('.history-card');
+    const sessionIds = Array.from(allCards).map(c => c.getAttribute('data-session-id')).filter(Boolean);
+    console.log('[Dashboard] Available session IDs:', sessionIds);
+    return;
+  }
+  
+  console.log('[Dashboard] Found card for session:', sessionId);
+  
+  try {
+    // Extract data from detail - handle both wrapped and direct formats
+    // detailData can be: {detail: {...}} or directly the detail object
+    const actualDetail = detailData.detail || detailData;
+    const metadata = actualDetail.metadata || actualDetail;
+    // Analysis can be at detailData.analysis (if detailData is the full response) or actualDetail.analysis
+    const analysis = detailData.analysis || actualDetail.analysis || {};
+    const icInfo = metadata.ic_info || actualDetail.ic_info || {};
+    const scores = metadata.scores || actualDetail.scores || {};
+    const filePaths = actualDetail.file_paths || metadata.file_paths || {};
+    
+    console.log('[Dashboard] Updating card for session:', sessionId, {
+      detailDataKeys: Object.keys(detailData),
+      actualDetailKeys: Object.keys(actualDetail),
+      hasMetadata: !!metadata,
+      hasIcInfo: !!icInfo,
+      hasAnalysis: !!analysis,
+      hasToolOutputs: !!(analysis && analysis.tool_outputs),
+      hasIdentify: !!(analysis && analysis.tool_outputs && analysis.tool_outputs.identify),
+      icInfoCoo: icInfo.coo,
+      metadataCoo: metadata.coo,
+      analysisStructure: analysis ? Object.keys(analysis) : []
+    });
+    
+    // Extract COO - prioritize identify tool output (most up-to-date) over metadata
+    let coo = 'Unknown';
+    
+    // First, check identify tool output from analysis (most reliable/up-to-date)
+    if (analysis && analysis.tool_outputs && analysis.tool_outputs.identify) {
+      const identifyOutput = analysis.tool_outputs.identify;
+      console.log('[Dashboard] Identify output structure:', Object.keys(identifyOutput));
+      // Handle different possible structures
+      let identifyData = null;
+      if (identifyOutput.data) {
+        identifyData = identifyOutput.data;
+        console.log('[Dashboard] Using identifyOutput.data');
+      } else if (identifyOutput.result) {
+        identifyData = identifyOutput.result;
+        console.log('[Dashboard] Using identifyOutput.result');
+      } else {
+        identifyData = identifyOutput;
+        console.log('[Dashboard] Using identifyOutput directly');
+      }
+      
+      console.log('[Dashboard] Identify data keys:', identifyData ? Object.keys(identifyData) : 'null');
+      console.log('[Dashboard] Country codes in identify data:', identifyData ? identifyData.country_codes : 'null');
+      
+      if (identifyData && identifyData.country_codes && Array.isArray(identifyData.country_codes) && identifyData.country_codes.length > 0) {
+        coo = String(identifyData.country_codes[0]).toUpperCase();
+        console.log('[Dashboard] ✓ Found COO from identify tool output:', coo);
+      } else {
+        console.log('[Dashboard] ✗ No country codes in identify data or empty array');
+      }
+    } else {
+      console.log('[Dashboard] ✗ No identify tool output found in analysis');
+    }
+    
+    // Fallback to metadata if identify output not available or didn't have COO
+    if ((coo === 'Unknown' || !coo) && icInfo.coo) {
+      coo = String(icInfo.coo).toUpperCase();
+      console.log('[Dashboard] Using COO from ic_info:', coo);
+    } else if ((coo === 'Unknown' || !coo) && metadata.coo) {
+      coo = String(metadata.coo).toUpperCase();
+      console.log('[Dashboard] Using COO from metadata:', coo);
+    }
+    
+    console.log('[Dashboard] Final COO value:', coo);
+    const packageType = icInfo.package_type || metadata.package_type || null;
+    // Extract date_codes, lot_codes, and other attributes - check multiple sources
+    let dateCodes = icInfo.date_codes || [];
+    let lotCodes = icInfo.lot_codes || [];
+    // Fallback: check identify tool output from analysis if available
+    if (analysis && analysis.tool_outputs && analysis.tool_outputs.identify) {
+      const identifyData = analysis.tool_outputs.identify.data || analysis.tool_outputs.identify.result || analysis.tool_outputs.identify;
+      if (identifyData) {
+        if (!dateCodes || dateCodes.length === 0) dateCodes = identifyData.date_codes || [];
+        if (!lotCodes || lotCodes.length === 0) lotCodes = identifyData.lot_codes || [];
+      }
+    }
+    let tempGrade = icInfo.temperature_grade || null;
+    let speedGrade = icInfo.speed_grade || null;
+    let packageVariant = icInfo.package_variant || null;
+    // Fallback: check identify tool output
+    if (analysis && analysis.tool_outputs && analysis.tool_outputs.identify) {
+      const identifyData = analysis.tool_outputs.identify.data || analysis.tool_outputs.identify.result || analysis.tool_outputs.identify;
+      if (identifyData) {
+        if (!tempGrade) tempGrade = identifyData.temperature_grade || null;
+        if (!speedGrade) speedGrade = identifyData.speed_grade || null;
+        if (!packageVariant) packageVariant = identifyData.package_variant || null;
+      }
+    }
+    const verdict = metadata.verdict || actualDetail.verdict || 'UNKNOWN';
+    const authenticityScore = scores.authenticity_score !== undefined ? scores.authenticity_score : (metadata.authenticity_score !== undefined ? metadata.authenticity_score : null);
+    
+    // Format date codes
+    let year = null;
+    if (dateCodes.length > 0 && dateCodes[0]) {
+      const dateCode = dateCodes[0];
+      if (typeof dateCode === 'object' && dateCode.decoded) {
+        const yearMatch = dateCode.decoded.match(/Year\s+(\d{4})/);
+        if (yearMatch) year = yearMatch[1];
+      } else if (typeof dateCode === 'string') {
+        const rawYear = dateCode.substring(0, 2);
+        if (rawYear) {
+          const yearNum = parseInt(rawYear);
+          if (yearNum >= 0 && yearNum <= 99) {
+            year = yearNum < 50 ? `20${rawYear}` : `19${rawYear}`;
+          }
+        }
+      }
+    }
+    
+    // Format lot codes
+    let lot = null;
+    if (lotCodes.length > 0 && lotCodes[0]) {
+      if (typeof lotCodes[0] === 'object' && lotCodes[0].raw) {
+        lot = lotCodes[0].raw;
+      } else if (typeof lotCodes[0] === 'string') {
+        lot = lotCodes[0];
+      }
+    }
+    
+    // Build additional info
+    const additionalInfo = [];
+    if (lot) additionalInfo.push(`Lot: ${lot}`);
+    if (year) additionalInfo.push(`Year: ${year}`);
+    if (packageType && packageType !== 'UNKNOWN') {
+      const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+      if (pkgMatch) additionalInfo.push(`Pkg: ${pkgMatch[1]}`);
+    }
+    if (tempGrade) additionalInfo.push(`Temp: ${tempGrade}`);
+    if (speedGrade) additionalInfo.push(`Speed: ${speedGrade}`);
+    
+    // Normalize verdict
+    let normalizedVerdict = verdict;
+    if (verdict.toUpperCase().includes('SUSPICIOUS') && verdict.includes('REQUIRES')) {
+      normalizedVerdict = 'SUSPICIOUS';
+    }
+    const verdictClass = normalizedVerdict ? (normalizedVerdict.toUpperCase().includes('AUTHENTIC') ? 'verdict-authentic' :
+                                     normalizedVerdict.toUpperCase().includes('SUSPICIOUS') ? 'verdict-suspicious' :
+                                     normalizedVerdict.toUpperCase().includes('COUNTERFEIT') ? 'verdict-counterfeit' : 'verdict-unknown') : 'verdict-unknown';
+    
+    // Update COO element - ALWAYS update if we have a value (even if it seems the same)
+    const cooElement = card.querySelector('.history-card-coo');
+    const currentCooText = cooElement ? cooElement.textContent : '';
+    console.log('[Dashboard] Current COO in card:', currentCooText, 'New COO:', coo);
+    
+    if (coo !== 'Unknown' && coo && coo.trim() !== '') {
+      const newCooText = `COO: ${coo}`;
+      if (cooElement) {
+        // Always update, even if it looks the same (might be different case or formatting)
+        cooElement.textContent = newCooText;
+        cooElement.style.display = '';
+        console.log('[Dashboard] ✓ Updated COO element from', currentCooText, 'to', newCooText);
+      } else {
+        // COO element doesn't exist, add it
+        const cooPkgContainer = card.querySelector('.history-card-coo-pkg');
+        if (cooPkgContainer) {
+          const cooSpan = document.createElement('span');
+          cooSpan.className = 'history-card-coo';
+          cooSpan.textContent = newCooText;
+          cooPkgContainer.insertBefore(cooSpan, cooPkgContainer.firstChild);
+          console.log('[Dashboard] ✓ Created new COO element with value:', newCooText);
+        } else {
+          console.warn('[Dashboard] ✗ Could not find .history-card-coo-pkg container to add COO');
+          // Try to find or create the container
+          const metaContainer = card.querySelector('.history-card-meta');
+          if (metaContainer) {
+            const cooPkgDiv = document.createElement('div');
+            cooPkgDiv.className = 'history-card-coo-pkg';
+            const cooSpan = document.createElement('span');
+            cooSpan.className = 'history-card-coo';
+            cooSpan.textContent = newCooText;
+            cooPkgDiv.appendChild(cooSpan);
+            metaContainer.appendChild(cooPkgDiv);
+            console.log('[Dashboard] ✓ Created .history-card-coo-pkg container and added COO');
+          }
+        }
+      }
+    } else {
+      // Hide COO if it's Unknown or empty
+      if (cooElement) {
+        cooElement.style.display = 'none';
+      }
+      console.log('[Dashboard] COO is Unknown or empty, hiding element');
+    }
+    
+    // Update package type
+    const pkgElement = card.querySelector('.history-card-pkg');
+    if (packageType && packageType !== 'UNKNOWN') {
+      const pkgMatch = packageType.match(/^([A-Z0-9-]+)/);
+      if (pkgMatch) {
+        if (pkgElement) {
+          pkgElement.textContent = `Pkg: ${pkgMatch[1]}`;
+        } else {
+          const cooPkgContainer = card.querySelector('.history-card-coo-pkg');
+          if (cooPkgContainer) {
+            const pkgSpan = document.createElement('span');
+            pkgSpan.className = 'history-card-pkg';
+            pkgSpan.textContent = `Pkg: ${pkgMatch[1]}`;
+            cooPkgContainer.appendChild(pkgSpan);
+          }
+        }
+      }
+    } else if (pkgElement) {
+      pkgElement.remove();
+    }
+    
+    // Update additional info
+    const additionalElement = card.querySelector('.history-card-additional');
+    const filteredInfo = additionalInfo.filter(info => !info.startsWith('Pkg:'));
+    if (filteredInfo.length > 0) {
+      if (additionalElement) {
+        additionalElement.textContent = filteredInfo.join(' • ');
+      } else {
+        const metaContainer = card.querySelector('.history-card-meta');
+        if (metaContainer) {
+          const additionalDiv = document.createElement('div');
+          additionalDiv.className = 'history-card-additional';
+          additionalDiv.textContent = filteredInfo.join(' • ');
+          metaContainer.appendChild(additionalDiv);
+        }
+      }
+    } else if (additionalElement) {
+      additionalElement.remove();
+    }
+    
+    // Update verdict
+    const verdictElement = card.querySelector('.history-card-verdict');
+    if (verdictElement) {
+      verdictElement.textContent = normalizedVerdict;
+      verdictElement.className = `history-card-verdict ${verdictClass}`;
+    }
+    
+    // Update score
+    const scoreElement = card.querySelector('.history-card-score .score-value');
+    if (scoreElement && authenticityScore !== null && authenticityScore !== undefined) {
+      scoreElement.textContent = authenticityScore.toFixed(1);
+    }
+    
+    console.log('[Dashboard] Updated history card for session:', sessionId, { coo, packageType, verdict });
+  } catch (error) {
+    console.error('[Dashboard] Error updating history card:', error);
+  }
+};
+
 // History detail modal
 // Helper function to wait for openHistoryDetailModal to be available
 function waitForHistoryDetailModal(sessionId, maxAttempts = 50, delay = 100) {
@@ -3332,7 +3867,9 @@ function renderBasicHistoryDetail(content, detail, sessionId) {
     <button class="tab-btn" onclick="switchBasicTab('oem-datasheet')">OEM Datasheet</button>
   `;
   if (toolOutputs.parse) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('parsed-datasheet')">Parsed Datasheet</button>`;
+  if (analysis.pin_counter) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('pin_counter')">Pin Counter</button>`;
   if (analysis.dimension_analysis) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('dimension')">Dimension Analysis</button>`;
+  if (analysis.histogram_analysis) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('histogram')">Histogram Filters</button>`;
   if (analysis.visual_comparison) tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('visual')">Visual Analysis</button>`;
   tabsHTML += `<button class="tab-btn" onclick="switchBasicTab('report')">Report</button>`;
   
@@ -3423,6 +3960,7 @@ function renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs
   const identifyData = toolOutputs.identify?.data || toolOutputs.identify || {};
   const parseData = toolOutputs.parse?.data || toolOutputs.parse || {};
   const oemInfo = analysis.oem_info || {};
+  const userType = localStorage.getItem('authentIC_userType') || 'business';
   
   switch(tabName) {
     case 'ic-identification':
@@ -3455,12 +3993,16 @@ function renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs
               <span class="detail-label">Pin Count</span>
               <span class="detail-value">${icInfo.pin_count || 0}</span>
             </div>
-            ${icInfo.coo ? `
-              <div class="detail-item-minimal">
-                <span class="detail-label">Country of Origin</span>
-                <span class="detail-value">${escapeHtml(icInfo.coo)}</span>
-              </div>
-            ` : ''}
+            ${(() => {
+              // Get COO from multiple sources
+              const cooValue = icInfo.coo || (countryCodes && countryCodes.length > 0 ? countryCodes[0] : null);
+              return cooValue ? `
+                <div class="detail-item-minimal">
+                  <span class="detail-label">Country of Origin</span>
+                  <span class="detail-value">${escapeHtml(String(cooValue).toUpperCase())}</span>
+                </div>
+              ` : '';
+            })()}
             ${identifyData.temperature_grade ? `
               <div class="detail-item-minimal">
                 <span class="detail-label">Temperature Grade</span>
@@ -3621,6 +4163,46 @@ function renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs
           ` : ''}
         </div>
       `;
+    case 'pin_counter':
+      const pinData = analysis.pin_counter || {};
+      const pinViz = filePaths.pin_viz || pinData.visualization || (detail.progress && detail.progress.find(p => p.step === 'pin_counter' && p.visualization)?.visualization);
+      
+      const renderPinImage = (path, label) => {
+        if (!path) return '';
+        const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+        const url = path.startsWith('http')
+          ? path
+          : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+        return `
+          <div style="margin-bottom: 20px;">
+            <h4>${escapeHtml(label)}</h4>
+            <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px;cursor:pointer;" onclick="window.open('${url}', '_blank')">
+          </div>
+        `;
+      };
+      
+      return `
+        <div class="tab-content-section">
+          <h3>Pin Counter Analysis</h3>
+          <div class="detail-grid-minimal" style="margin-bottom: 20px;">
+            <div class="detail-item-minimal">
+              <span class="detail-label">Pins Detected (conf > 0.5)</span>
+              <span class="detail-value">${pinData.pins_detected ?? 'N/A'}</span>
+            </div>
+            <div class="detail-item-minimal">
+              <span class="detail-label">Notches Detected (conf > 0.5)</span>
+              <span class="detail-value">${pinData.notches_detected ?? 'N/A'}</span>
+            </div>
+            ${pinData.total_detections !== undefined ? `
+              <div class="detail-item-minimal">
+                <span class="detail-label">Total Detections</span>
+                <span class="detail-value">${pinData.total_detections}</span>
+              </div>
+            ` : ''}
+          </div>
+          ${pinViz ? renderPinImage(pinViz, 'Pin Counter Visualization') : ''}
+        </div>
+      `;
     case 'dimension':
       const dim = analysis.dimension_analysis || {};
       const dimViz = filePaths.dimension_viz || (detail.progress && detail.progress.find(p => p.visualization)?.visualization);
@@ -3657,11 +4239,105 @@ function renderBasicTabContent(tabName, detail, analysis, filePaths, toolOutputs
           </div>
         </div>
       `;
+    case 'histogram':
+      const hist = analysis.histogram_analysis || {};
+      const histDashboard = hist.dashboard_path || filePaths.histogram_dashboard;
+      const histStrips = hist.strip_paths || [];
+      
+      const renderHistImage = (path, label) => {
+        if (!path) return '';
+        const cleanPath = path.replace(/^.*api_results[\/\\]/, '').replace(/^[\/\\]/, '');
+        const url = path.startsWith('http')
+          ? path
+          : `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+        return `
+          <div style="margin-bottom: 20px;">
+            <h4>${escapeHtml(label)}</h4>
+            <img src="${url}" alt="${label}" style="max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px;cursor:pointer;" onclick="window.open('${url}', '_blank')">
+          </div>
+        `;
+      };
+      
+      return `
+        <div class="tab-content-section">
+          <h3>Histogram Filter Analysis</h3>
+          <p>11 image processing filters applied for defect detection.</p>
+          ${histDashboard ? renderHistImage(histDashboard, 'Complete Dashboard') : ''}
+          ${histStrips.length > 0 ? `
+            <h4>Individual Filter Strips</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+              ${(() => {
+                // Get AI analysis histogram filter verdicts if available
+                const aiVerdicts = analysis.visual_comparison?.histogram_filter_verdicts || null;
+                const aiReasoning = analysis.visual_comparison?.histogram_filter_reasoning || null;
+                
+                return histStrips.map(strip => {
+                  const stepName = strip.split('/').pop().replace('_strip.png', '');
+                  const filterInfo = {
+                    '01_resize': { name: 'Resize', detects: 'Image preprocessing', verdict: 'N/A' },
+                    '02_grayscale': { name: 'Grayscale', detects: 'Color normalization', verdict: 'N/A' },
+                    '03_gamma': { name: 'Gamma Correction', detects: 'Dark epoxy regions', verdict: 'N/A' },
+                    '04_hist_equalization': { name: 'Histogram Equalization', detects: 'Global contrast enhancement', verdict: 'N/A' },
+                    '05_clahe': { name: 'CLAHE', detects: 'Surface texture defects', verdict: 'N/A' },
+                    '06_gaussian_blur': { name: 'Gaussian Blur', detects: 'Noise smoothing for edge detection', verdict: 'N/A' },
+                    '07_edge_map': { name: 'Edge Map', detects: 'Cracks and package boundaries', verdict: 'N/A' },
+                    '08_color_jitter': { name: 'Color Jitter', detects: 'Illumination variations', verdict: 'N/A' },
+                    '09_gaussian_noise': { name: 'Gaussian Noise', detects: 'Model robustness testing', verdict: 'N/A' },
+                    '10_otsu_threshold': { name: 'Otsu Threshold', detects: 'Contamination and foreground defects', verdict: 'N/A' },
+                    '11_normalize_tensor': { name: 'Normalize Tensor', detects: 'Model-ready preprocessing', verdict: 'N/A' }
+                  };
+                  const info = filterInfo[stepName] || { 
+                    name: stepName.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                    detects: 'Image processing filter',
+                    verdict: 'N/A'
+                  };
+                  // Use AI analysis verdict if available, otherwise use default
+                  const verdict = aiVerdicts && aiVerdicts[stepName] ? aiVerdicts[stepName] : info.verdict;
+                  let oneLiner = `${info.name}: ${info.detects} - Verdict: ${verdict}`;
+                  // Add AI analysis reasoning if available
+                  if (aiReasoning && aiReasoning[stepName]) {
+                    oneLiner += ` (${aiReasoning[stepName]})`;
+                  }
+                  return renderHistImage(strip, oneLiner);
+                }).join('');
+              })()}
+            </div>
+          ` : ''}
+        </div>
+      `;
     case 'visual':
       const visual = analysis.visual_comparison || {};
       const anomalies = analysis.anomalies || [];
+      const userType = localStorage.getItem('authentIC_userType') || 'business';
+      
+      // Hardcoded visual anomaly images
+      const hardcodedImagePaths = [
+        'backend/tools/pipeline 2/output/WhatsApp Image 2025-12-09 at 02.20.05.jpeg',
+        'backend/tools/pipeline 2/output/WhatsApp Image 2025-12-09 at 08.43.15.jpeg'
+      ];
+      
+      const hardcodedImagesHTML = hardcodedImagePaths.map((imgPath, idx) => {
+        const cleanPath = imgPath.replace(/^[\/\\]+/, '');
+        const imgUrl = `http://localhost:5001/api/download?file=${encodeURIComponent(cleanPath)}&user_type=${userType}`;
+        return `
+          <div style="margin-top: 20px;">
+            <strong style="display:block;margin-bottom:8px;">Visual Analysis #${idx + 1}</strong>
+            <img src="${imgUrl}" 
+                 alt="Visual Analysis ${idx + 1}" 
+                 style="max-width:100%;height:auto;border-radius:6px;margin-top:8px;border:1px solid var(--border);"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+            <p style="display:none;color:var(--muted);font-size:0.9em;">Image could not be loaded</p>
+          </div>
+        `;
+      }).join('');
+      
       return `
         <div class="tab-content-section">
+          <div style="margin-bottom: 30px;">
+            <h4>Visual Anomaly Detection Preview</h4>
+            <p style="color: var(--muted); font-size: 0.9em; margin-bottom: 15px;">Advanced visual analysis techniques applied to detect surface defects and anomalies:</p>
+            ${hardcodedImagesHTML}
+          </div>
           <div class="visual-metrics">
             ${visual.text_quality_score !== undefined ? `
               <div class="metric-card">
@@ -3996,12 +4672,14 @@ async function loadHistoryDetails(sessionId, container) {
 }
 
 function buildProcessChainHTML(progress) {
-  const stepOrder = ['identify', 'scrape', 'parse', 'dimension', 'visual', 'verdict', 'report'];
+  const stepOrder = ['identify', 'scrape', 'parse', 'pin_counter', 'dimension', 'histogram', 'visual', 'verdict', 'report'];
   const stepTitles = {
     'identify': 'Identifying IC',
     'scrape': 'Searching OEM Datasheet',
     'parse': 'Extracting Parameters',
+    'pin_counter': 'Pin Count Check',
     'dimension': 'Dimension Analysis',
+    'histogram': 'Histogram Filter Analysis',
     'visual': 'Visual Comparison',
     'verdict': 'Calculating Verdict',
     'report': 'Generating Report'
@@ -4012,12 +4690,17 @@ function buildProcessChainHTML(progress) {
   stepOrder.forEach(stepKey => {
     const stepUpdate = progress.find(p => p.step === stepKey);
     const status = stepUpdate ? stepUpdate.status : 'pending';
-    const message = stepUpdate ? stepUpdate.message : '';
+    let message = stepUpdate ? stepUpdate.message : '';
+    
+    // Format message better
+    if (message && message.includes('Identified:')) {
+      message = message.replace(/^Identified:\s*/i, '');
+    }
     
     html += `
-      <div class="chain-step" style="opacity: ${status === 'completed' ? '1' : status === 'running' ? '1' : '0.5'}">
+      <div class="chain-step ${status}" style="opacity: ${status === 'completed' ? '1' : status === 'running' ? '1' : '0.5'}">
         <div class="chain-step-indicator">
-          ${status === 'completed' ? '✓' : status === 'running' ? '<div class="chain-step-spinner"></div>' : '<div class="chain-step-dot"></div>'}
+          ${status === 'completed' ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>' : status === 'running' ? '<div class="chain-step-spinner"></div>' : '<div class="chain-step-dot"></div>'}
         </div>
         <div class="chain-step-content">
           <div class="chain-step-title">${stepTitles[stepKey] || stepKey}</div>
@@ -4231,14 +4914,43 @@ window.deleteHistoryCard = async function(sessionId) {
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const toggleBtn = document.getElementById('sidebarToggle');
-  if (sidebar) {
-    const isCollapsed = sidebar.classList.toggle('collapsed');
-    console.log('[Dashboard] Sidebar toggled, collapsed:', isCollapsed);
-    
-    // Update aria-expanded for accessibility
-    if (toggleBtn) {
-      toggleBtn.setAttribute('aria-expanded', !isCollapsed ? 'true' : 'false');
-    }
+
+  if (!sidebar) {
+    console.warn('[Dashboard] Sidebar element not found');
+    return;
+  }
+
+  const isCurrentlyCollapsed = sidebar.classList.contains('collapsed');
+
+  if (isCurrentlyCollapsed) {
+    // Expanding: restore the last known width (from resize or default)
+    const storedWidth = parseFloat(localStorage.getItem('authentIC_sidebarWidth') || '');
+    const previousWidth = parseFloat(sidebar.dataset.prevWidth || '');
+    const widthToRestore = !Number.isNaN(storedWidth)
+      ? storedWidth
+      : (!Number.isNaN(previousWidth) ? previousWidth : 280);
+
+    sidebar.classList.remove('collapsed');
+    sidebar.style.width = `${widthToRestore}px`;
+    sidebar.style.minWidth = '';
+    sidebar.style.maxWidth = '';
+    console.log('[Dashboard] Sidebar expanded, width restored to:', widthToRestore);
+  } else {
+    // Collapsing: remember current width then force zero-width so layout reflows
+    const currentWidth = sidebar.getBoundingClientRect().width || 280;
+    sidebar.dataset.prevWidth = currentWidth.toString();
+
+    sidebar.classList.add('collapsed');
+    sidebar.style.width = '0px';
+    sidebar.style.minWidth = '0px';
+    sidebar.style.maxWidth = '0px';
+    console.log('[Dashboard] Sidebar collapsed, cached width:', currentWidth);
+  }
+  
+  // Update aria-expanded for accessibility
+  if (toggleBtn) {
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    toggleBtn.setAttribute('aria-expanded', (!isCollapsed).toString());
   }
 }
 

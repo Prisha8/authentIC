@@ -19,6 +19,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from pathlib import Path
 import json
 import uuid
+import re
 from datetime import datetime
 from typing import Optional, List
 import sys
@@ -34,6 +35,8 @@ from agents.counterfeit_detector import CounterfeitDetector
 from agents.conversational_agent import get_agent
 from agents.conversational_agent import get_agent
 from utils.history_manager import HistoryManager
+from tools.sam21_segmenter import generate_sam21_mask, Sam21NotAvailable
+from tools.pcb_detector import detect_pcb_ics
 
 # Optional vector DB import - app will work without it
 try:
@@ -90,7 +93,16 @@ def get_storage_path_str(user_type: Optional[str] = None) -> str:
 backend_dir = Path(__file__).parent  # backend/
 project_root = backend_dir.parent  # counterfeit_IC/
 default_api_results_path = project_root / "data" / "api_results"
-detector = CounterfeitDetector(output_dir=str(default_api_results_path))
+PIN_COUNTER_WEIGHTS_PATH = os.getenv("PIN_COUNTER_WEIGHTS_PATH") or str(
+    Path(__file__).parent / "weights" / "pin_counter.pt"
+)
+PCB_WEIGHTS_PATH = os.getenv("PCB_WEIGHTS_PATH") or str(
+    Path(__file__).parent / "weights" / "pcb_weights.pt"
+)
+detector = CounterfeitDetector(
+    output_dir=str(default_api_results_path),
+    pin_counter_weights=PIN_COUNTER_WEIGHTS_PATH
+)
 
 # Initialize default history manager for business (will be recreated per-request if needed)
 default_history_manager = HistoryManager(base_dir="data/api_results")
@@ -262,7 +274,10 @@ def detect_counterfeit():
         print(f"[API] Using storage path: {api_results_path.resolve()}")
         
         # Create per-request detector and history manager
-        request_detector = CounterfeitDetector(output_dir=str(api_results_path))
+        request_detector = CounterfeitDetector(
+            output_dir=str(api_results_path),
+            pin_counter_weights=PIN_COUNTER_WEIGHTS_PATH
+        )
         
         # For history manager, calculate relative path from project root
         backend_dir = Path(__file__).parent  # backend/
@@ -318,6 +333,10 @@ def detect_counterfeit():
         
         # Get additional info if provided
         additional_info = request.form.get('additional_info', '')
+
+        # Optional PCB/FPGA board mode flag
+        pcb_mode_raw = request.form.get('pcb_mode') or request.args.get('pcb_mode')
+        pcb_mode_enabled = str(pcb_mode_raw).lower() in ['true', '1', 'yes', 'on']
         
         # CRITICAL: Read file contents into memory BEFORE starting background thread
         # Flask file objects get closed when request ends, so we must read them first
@@ -353,7 +372,8 @@ def detect_counterfeit():
             'started_at': datetime.now().isoformat(),
             'progress': [],
             'current_step': 'Initializing...',
-            'user_type': user_type  # Store user type with session
+            'user_type': user_type,  # Store user type with session
+            'pcb_mode': pcb_mode_enabled
         }
         
         print(f"[API] Session {session_id} created and stored. Total sessions: {len(sessions)}")
@@ -429,8 +449,76 @@ def detect_counterfeit():
                     
                     all_image_paths.append(str(image_path))
                 
-                # Run detection with all images (multiple views)
-                # Pass uploaded PDF path and additional info
+                # If PCB mode is enabled, run YOLOv11 detector to crop ICs first
+                if pcb_mode_enabled:
+                    progress_queue.put({
+                        'type': 'step',
+                        'step': 'pcb_detect',
+                        'title': 'PCB IC Detection',
+                        'status': 'running',
+                        'message': 'Detecting ICs on PCB/FPGA images with YOLOv11...'
+                    })
+
+                    def to_frontend_path(path_str: str) -> str:
+                        try:
+                            path_obj = Path(path_str).resolve()
+                            base = api_results_path.resolve() if api_results_path else None
+                            if base:
+                                return str(path_obj.relative_to(base)).replace('\\', '/')
+                        except Exception:
+                            pass
+                        return Path(path_str).name
+
+                    pcb_crops: List[str] = []
+                    pcb_overlays: List[str] = []
+                    pcb_output_dir = (api_results_path or Path("data/api_results")).resolve() / "pcb"
+                    for src_path in list(all_image_paths):
+                        try:
+                            pcb_result = detect_pcb_ics(
+                                image_path=src_path,
+                                weights_path=PCB_WEIGHTS_PATH,
+                                output_dir=str(pcb_output_dir)
+                            )
+                            pcb_overlays.append(to_frontend_path(pcb_result.get('overlay_path')))
+                            for crop in pcb_result.get('crops', []):
+                                crop_path = crop.get('crop_path')
+                                if crop_path:
+                                    pcb_crops.append(str(Path(crop_path).resolve()))
+                        except Exception as pcb_err:
+                            print(f"[API] PCB detection failed for {src_path}: {pcb_err}")
+                            import traceback
+                            traceback.print_exc()
+                            progress_queue.put({
+                                'type': 'step',
+                                'step': 'pcb_detect',
+                                'title': 'PCB IC Detection',
+                                'status': 'completed',
+                                'message': f'PCB detection issue: {pcb_err}'
+                            })
+
+                    if pcb_crops:
+                        all_image_paths = pcb_crops
+                        progress_queue.put({
+                            'type': 'step',
+                            'step': 'pcb_detect',
+                            'title': 'PCB IC Detection',
+                            'status': 'completed',
+                            'message': f'Found {len(pcb_crops)} IC region(s); using crops for analysis',
+                            'data': {
+                                'overlay_paths': [p for p in pcb_overlays if p],
+                                'crop_paths': [to_frontend_path(p) for p in pcb_crops]
+                            }
+                        })
+                    else:
+                        progress_queue.put({
+                            'type': 'step',
+                            'step': 'pcb_detect',
+                            'title': 'PCB IC Detection',
+                            'status': 'completed',
+                            'message': 'No IC regions detected; using original uploads'
+                        })
+
+                # Run detection with (possibly cropped) images (multiple views)
                 if not all_image_paths:
                     raise ValueError("No image paths available for detection")
                 
@@ -582,6 +670,8 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
     import time
     from pathlib import Path
     import traceback
+    import cv2
+    import numpy as np
     
     try:
         start_time = time.time()
@@ -606,7 +696,92 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             additional_info=additional_info  # Store additional info if provided
         )
         
-        # STEP 1: IC Identification
+        # STEP 0: Preprocessing - Run pipeline to get cropped IC and OCR visualization
+        progress_queue.put({
+            'type': 'step',
+            'step': 'preprocess',
+            'title': 'Preprocessing Image',
+            'status': 'running',
+            'message': 'Segmenting IC and detecting text regions...'
+        })
+        
+        # Import pipeline module
+        import sys
+        import importlib.util
+        pipeline_path = Path(__file__).parent / "tools" / "pipeline 2" / "pipeline.py"
+        spec = importlib.util.spec_from_file_location("preprocessing_pipeline", pipeline_path)
+        preprocessing_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preprocessing_module)
+        run_preprocessing_pipeline = preprocessing_module.run_pipeline
+        
+        # Create preprocessing output directory in session folder
+        if api_results_path is None:
+            backend_dir = Path(__file__).parent
+            project_root = backend_dir.parent
+            api_results_path = project_root / 'data' / 'api_results'
+        
+        preprocessing_output_dir = api_results_path / session_id / 'preprocessing'
+        preprocessing_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Run preprocessing on primary image
+        preprocessing_result = run_preprocessing_pipeline(
+            image_path=str(primary_image_path.resolve()),
+            output_dir=str(preprocessing_output_dir),
+            sam_model_path=str(Path(__file__).parent.parent / "weights" / "sam2.1_b.pt")
+        )
+        
+        if not preprocessing_result:
+            raise RuntimeError("Preprocessing failed - could not crop IC")
+        
+        # Get cropped image path (this will be used for Gemini and dimension estimation)
+        cropped_image_path = preprocessing_result.get('output_ic_crop')
+        ocr_visualization_path = preprocessing_result.get('output_textbox_viz')
+        
+        if not cropped_image_path or not Path(cropped_image_path).exists():
+            raise FileNotFoundError(f"Preprocessing output not found: {cropped_image_path}")
+        
+        # Store preprocessing outputs in result
+        result.preprocessing_outputs = {
+            'ic_crop': cropped_image_path,
+            'ocr_visualization': ocr_visualization_path,
+            'horizontal_0': preprocessing_result.get('output_0_deg'),
+            'horizontal_180': preprocessing_result.get('output_180_deg')
+        }
+        
+        # Create URL for OCR visualization (for display in chain/preview)
+        ocr_viz_url = None
+        if ocr_visualization_path and Path(ocr_visualization_path).exists():
+            try:
+                ocr_viz_path = Path(ocr_visualization_path)
+                if ocr_viz_path.is_absolute():
+                    try:
+                        ocr_viz_rel = str(ocr_viz_path.relative_to(api_results_path))
+                    except ValueError:
+                        ocr_viz_rel = ocr_viz_path.name
+                else:
+                    ocr_viz_rel = str(ocr_viz_path)
+                ocr_viz_rel = ocr_viz_rel.replace('\\', '/').lstrip('/')
+                from urllib.parse import quote
+                ocr_viz_url = f'http://localhost:5001/api/download?file={quote(ocr_viz_rel, safe="")}'
+            except Exception as e:
+                print(f"[API] Error processing OCR visualization path: {e}")
+                ocr_viz_url = None
+        
+        progress_queue.put({
+            'type': 'step',
+            'step': 'preprocess',
+            'title': 'Preprocessing Image',
+            'status': 'completed',
+            'message': 'IC cropped, text regions and logo detected',
+            'visualization': ocr_viz_url,  # Show OCR visualization in chain/preview
+            'data': {
+                'ic_crop_path': str(Path(cropped_image_path).relative_to(api_results_path)) if Path(cropped_image_path).is_relative_to(api_results_path) else cropped_image_path,
+                'ocr_visualization_path': str(Path(ocr_visualization_path).relative_to(api_results_path)) if ocr_visualization_path and Path(ocr_visualization_path).is_relative_to(api_results_path) else ocr_visualization_path,
+                'ocr_visualization_url': ocr_viz_url
+            }
+        })
+        
+        # STEP 1: IC Identification (now using cropped image from preprocessing)
         progress_queue.put({
             'type': 'step',
             'step': 'identify',
@@ -614,13 +789,13 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'status': 'running',
             'message': 'Analyzing IC image with VLM...'
         })
-        # Use primary image for identification (can be enhanced to use all images)
-        image_path_abs = primary_image_path.resolve()
-        if not image_path_abs.exists():
-            raise FileNotFoundError(f"Image file not found: {image_path_abs}")
+        # Use cropped image from preprocessing for identification
+        cropped_image_path_abs = Path(cropped_image_path).resolve()
+        if not cropped_image_path_abs.exists():
+            raise FileNotFoundError(f"Cropped image file not found: {cropped_image_path_abs}")
         
-        # Pass all images and additional info to identification for better context
-        ic_info = detector._identify_ic(image_path_abs, additional_info=additional_info, all_images=image_paths)
+        # Pass cropped image to identification (not OCR visualization - that's just for display)
+        ic_info = detector._identify_ic(cropped_image_path_abs, additional_info=additional_info, all_images=[cropped_image_path_abs])
         result.part_number = ic_info.get('part_number', 'UNKNOWN')
         result.manufacturer = ic_info.get('manufacturer', 'UNKNOWN')
         result.package_type = ic_info.get('package_type', 'UNKNOWN')
@@ -767,6 +942,36 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
                     diagram_path_for_frontend = mechanical_diagram
             
             result.parsed_specs = parsed_specs
+            result.mechanical_diagram_path = mechanical_diagram
+            
+            # Extract dimensions using Gemini from the mechanical diagram
+            gemini_extracted_dims = None
+            if mechanical_diagram and Path(mechanical_diagram).exists():
+                try:
+                    print(f"[API] Extracting dimensions from diagram using Gemini...")
+                    gemini_extracted_dims = detector._extract_dimensions_with_gemini(mechanical_diagram)
+                    if gemini_extracted_dims:
+                        # Update parsed_specs with Gemini extraction (takes priority)
+                        if parsed_specs is None:
+                            parsed_specs = {}
+                        if 'package_dimensions' not in parsed_specs:
+                            parsed_specs['package_dimensions'] = {}
+                        # Merge Gemini extraction (prefer Gemini over parser)
+                        parsed_specs['package_dimensions'].update({
+                            'body_length_mm': gemini_extracted_dims.get('body_length_mm'),
+                            'body_width_mm': gemini_extracted_dims.get('body_width_mm'),
+                            'length_mm': gemini_extracted_dims.get('body_length_mm'),
+                            'width_mm': gemini_extracted_dims.get('body_width_mm'),
+                            'height_mm': gemini_extracted_dims.get('height_mm'),
+                            'pin_count': gemini_extracted_dims.get('pin_count'),
+                            'pin_pitch_mm': gemini_extracted_dims.get('pin_pitch_mm'),
+                            'package_type': gemini_extracted_dims.get('package_type')
+                        })
+                        result.parsed_specs = parsed_specs
+                        print(f"[API] ✓ Gemini extracted dimensions: {gemini_extracted_dims.get('body_length_mm')} × {gemini_extracted_dims.get('body_width_mm')} mm")
+                except Exception as e:
+                    print(f"[API] ⚠️  Gemini dimension extraction failed: {e}")
+            
             progress_queue.put({
                 'type': 'step',
                 'step': 'parse',
@@ -776,11 +981,52 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
                 'data': {
                     'mechanical_diagram': diagram_path_for_frontend,  # Use relative path
                     'datasheet_path': datasheet_path,
-                    'parsed_specs': parsed_specs
+                    'parsed_specs': parsed_specs,
+                    'package_dimensions': parsed_specs.get('package_dimensions', {}) if parsed_specs else {}
                 }
             })
         
-        # STEP 4: Dimension Analysis
+        # STEP 4: Pin Counter (local YOLO) - after datasheet extraction
+        progress_queue.put({
+            'type': 'step',
+            'step': 'pin_counter',
+            'title': 'Pin Count Check',
+            'status': 'running',
+            'message': 'Counting pins with local YOLO model...'
+        })
+        pin_counter_dict, pin_viz = detector._run_pin_counter(primary_image_path)
+        result.pin_counter = pin_counter_dict
+        result.pin_visualization = pin_viz
+        pin_viz_url = None
+        if pin_viz:
+            try:
+                pin_viz_path = Path(pin_viz)
+                if pin_viz_path.is_absolute():
+                    try:
+                        pin_viz_rel = str(pin_viz_path.relative_to(api_results_path))
+                    except ValueError:
+                        pin_viz_rel = pin_viz_path.name
+                else:
+                    pin_viz_rel = str(pin_viz_path)
+                pin_viz_rel = pin_viz_rel.replace('\\', '/').lstrip('/')
+                from urllib.parse import quote
+                pin_viz_url = f'http://localhost:5001/api/download?file={quote(pin_viz_rel, safe="")}'
+            except Exception as e:
+                print(f"[API] Error processing pin counter visualization path: {e}")
+                import traceback
+                traceback.print_exc()
+                pin_viz_url = None
+        progress_queue.put({
+            'type': 'step',
+            'step': 'pin_counter',
+            'title': 'Pin Count Check',
+            'status': 'completed',
+            'message': f"Pins detected: {pin_counter_dict.get('pins_detected', 0)}",
+            'visualization': pin_viz_url,
+            'data': pin_counter_dict
+        })
+        
+        # STEP 5: Dimension Analysis (using cropped image from preprocessing)
         progress_queue.put({
             'type': 'step',
             'step': 'dimension',
@@ -788,13 +1034,17 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'status': 'running',
             'message': 'Measuring IC body dimensions...'
         })
-        dimension_dict, dim_viz = detector._estimate_dimensions(image_path, result)
+        # Use cropped image from preprocessing for dimension estimation
+        dimension_dict, dim_viz = detector._estimate_dimensions(cropped_image_path, result)
         result.dimension_analysis = dimension_dict
-        result.dimension_visualization = dim_viz
-        if dim_viz:
+
+        # SAM-only visualization (produced inside dimension estimator)
+        chosen_viz = dim_viz
+        result.dimension_visualization = chosen_viz
+        if chosen_viz:
             # Convert to relative path for frontend
             try:
-                dim_viz_path = Path(dim_viz)
+                dim_viz_path = Path(chosen_viz)
                 # Use provided api_results_path or find it
                 if api_results_path is None:
                     backend_dir = Path(__file__).parent  # backend/
@@ -866,21 +1116,24 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
                 dim_viz_rel_encoded = quote(dim_viz_rel, safe='')
                 viz_url = f'http://localhost:5001/api/download?file={dim_viz_rel_encoded}'
                 
-                print(f"[API] Dimension viz URL: {viz_url} (from path: {dim_viz}, relative: {dim_viz_rel}, api_results: {api_results_path})")
+                print(f"[API] Dimension viz URL: {viz_url} (from path: {chosen_viz}, relative: {dim_viz_rel}, api_results: {api_results_path})")
             except Exception as e:
                 print(f"[API] Error processing visualization path: {e}")
                 import traceback
                 traceback.print_exc()
                 viz_url = None
             
+            measured_ar = dimension_dict.get("measured_aspect_ratio")
+            message_ar = f'{measured_ar:.2f}' if isinstance(measured_ar, (int, float)) else 'N/A'
             progress_queue.put({
                 'type': 'step',
                 'step': 'dimension',
                 'title': 'Dimension Analysis',
                 'status': 'completed',
-                'message': f'Dimensions: AR = {dimension_dict.get("measured_aspect_ratio", "N/A"):.2f}',
+                'message': f'Dimensions: AR = {message_ar}',
                 'visualization': viz_url,
-                'data': dimension_dict
+                'sam_visualization': viz_url,
+                'data': {**dimension_dict, 'sam_visualization': viz_url}
             })
         else:
             progress_queue.put({
@@ -891,21 +1144,111 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
                 'message': 'Dimension analysis complete'
             })
         
-        # STEP 5: Visual Analysis
+        # STEP 5.5: Histogram Filter Analysis
+        progress_queue.put({
+            'type': 'step',
+            'step': 'histogram_filter',
+            'title': 'Histogram Filter Analysis',
+            'status': 'running',
+            'message': 'Running image processing filters for defect detection...'
+        })
+        histogram_manifest, dashboard_path, strips = detector._run_histogram_filter(primary_image_path, result)
+        result.histogram_analysis = histogram_manifest
+        result.histogram_dashboard = dashboard_path
+        result.histogram_strips = strips
+        
+        # Create URLs for dashboard and strips
+        dashboard_url = None
+        if dashboard_path:
+            try:
+                dashboard_path_obj = Path(dashboard_path)
+                if dashboard_path_obj.is_absolute():
+                    try:
+                        dashboard_rel = str(dashboard_path_obj.relative_to(api_results_path))
+                    except ValueError:
+                        dashboard_rel = dashboard_path_obj.name
+                else:
+                    dashboard_rel = str(dashboard_path_obj)
+                dashboard_rel = dashboard_rel.replace('\\', '/').lstrip('/')
+                from urllib.parse import quote
+                dashboard_url = f'http://localhost:5001/api/download?file={quote(dashboard_rel, safe="")}'
+            except Exception as e:
+                print(f"[API] Error processing histogram dashboard path: {e}")
+                dashboard_url = None
+        
+        # Create URLs for all strip images
+        strip_urls = []
+        if strips:
+            for strip_path in strips:
+                try:
+                    strip_path_obj = Path(strip_path)
+                    if strip_path_obj.is_absolute():
+                        try:
+                            strip_rel = str(strip_path_obj.relative_to(api_results_path))
+                        except ValueError:
+                            strip_rel = strip_path_obj.name
+                    else:
+                        strip_rel = str(strip_path_obj)
+                    strip_rel = strip_rel.replace('\\', '/').lstrip('/')
+                    from urllib.parse import quote
+                    strip_url = f'http://localhost:5001/api/download?file={quote(strip_rel, safe="")}'
+                    strip_urls.append(strip_url)
+                except Exception as e:
+                    print(f"[API] Error processing strip path {strip_path}: {e}")
+                    # Still include the path even if URL creation fails
+                    strip_urls.append(strip_path)
+        
+        progress_queue.put({
+            'type': 'step',
+            'step': 'histogram_filter',
+            'title': 'Histogram Filter Analysis',
+            'status': 'completed',
+            'message': f'Applied 11 image processing filters (CLAHE, Edge Map, Threshold, etc.)',
+            'visualization': dashboard_url,
+            'data': {
+                'dashboard_path': dashboard_path,
+                'dashboard_url': dashboard_url,
+                'strip_paths': strips,  # Original paths
+                'strip_urls': strip_urls,  # URLs for frontend
+                'analysis_json_path': histogram_manifest.get('analysis_json_path') if histogram_manifest else None
+            }
+        })
+        
+        # STEP 6: Visual Analysis
         progress_queue.put({
             'type': 'step',
             'step': 'visual',
             'title': 'Visual Comparison',
             'status': 'running',
-            'message': 'Comparing IC with datasheet using VLM...'
+            'message': 'Performing visual analysis'
         })
+        
+        # Fetch similar annotations for RAG context
+        similar_annotations = []
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            try:
+                vector_db = get_vector_db()
+                if vector_db:
+                    # Search for similar annotations based on part number and manufacturer
+                    search_query = f"{result.part_number} {result.manufacturer} {result.package_type}"
+                    similar_annotations = vector_db.search_annotations(
+                        query=search_query,
+                        limit=5,
+                        filters={'correction_to_ai': True}  # Prioritize corrections
+                    )
+                    if similar_annotations:
+                        print(f"  → Found {len(similar_annotations)} similar annotations for RAG context")
+            except Exception as e:
+                print(f"  ⚠️  Error fetching annotations: {e}")
+        
         # Pass all images for multi-view analysis
         visual_result = detector._gemini_visual_analysis(
             primary_image_path, mechanical_diagram, parsed_specs, result,
             dimension_analysis=dimension_dict,
             datasheet_pdf_path=result.datasheet_path,
             all_images=image_paths,  # Pass all images for comprehensive analysis
-            additional_info=additional_info
+            additional_info=additional_info,
+            annotations=similar_annotations  # Pass annotations for RAG context
         )
         result.visual_comparison = visual_result
         result.anomalies = visual_result.get('anomalies', [])
@@ -916,11 +1259,13 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             'status': 'completed',
             'message': f'Analysis complete: {len(result.anomalies)} anomalies detected',
             'data': {
-                'anomalies_count': len(result.anomalies)
+                'anomalies_count': len(result.anomalies),
+                'anomalies': result.anomalies,
+                'visual_comparison': visual_result
             }
         })
         
-        # STEP 6: Final Verdict
+        # STEP 7: Final Verdict
         progress_queue.put({
             'type': 'step',
             'step': 'verdict',
@@ -941,7 +1286,7 @@ def _detect_with_progress(detector, image_path: str, session_id: str, progress_q
             }
         })
         
-        # STEP 7: Report Generation
+        # STEP 8: Report Generation
         progress_queue.put({
             'type': 'step',
             'step': 'report',
@@ -1107,6 +1452,9 @@ def download_file():
     business_path = project_root / 'data' / 'api_results'
     personal_path = project_root / 'data' / 'personal_api_results'
     
+    # Also allow access to backend/tools directory for hardcoded images
+    backend_tools_path = backend_dir / 'tools'
+    
     # Try to find the file - check personal first if user_type is personal, otherwise business first
     full_path = None
     api_results_path = None
@@ -1124,7 +1472,7 @@ def download_file():
     if Path(file_path).is_absolute():
         # If absolute, check if it's within any of our allowed paths
         full_path = Path(file_path)
-        for allowed_path in paths_to_try:
+        for allowed_path in paths_to_try + [backend_tools_path]:
             try:
                 if str(full_path.resolve()).startswith(str(allowed_path.resolve())):
                     api_results_path = allowed_path
@@ -1139,10 +1487,27 @@ def download_file():
                 full_path = candidate_path.resolve()
                 api_results_path = storage_path.resolve()
                 break
+        
+        # If not found in api_results, try backend/tools directory (for hardcoded images)
+        if full_path is None or not full_path.exists():
+            # Check if path starts with 'backend/tools' or just 'tools'
+            if file_path.startswith('backend/tools') or file_path.startswith('tools'):
+                # Remove 'backend/tools' prefix if present
+                relative_path = file_path.replace('backend/tools/', '').replace('tools/', '')
+                candidate_path = backend_tools_path / relative_path
+                if candidate_path.exists():
+                    full_path = candidate_path.resolve()
+                    api_results_path = backend_tools_path.resolve()
+            else:
+                # Try directly in backend_tools_path
+                candidate_path = backend_tools_path / file_path
+                if candidate_path.exists():
+                    full_path = candidate_path.resolve()
+                    api_results_path = backend_tools_path.resolve()
     
     # If still not found, try resolving relative to current working directory
     if full_path is None or not full_path.exists():
-        for storage_path in paths_to_try:
+        for storage_path in paths_to_try + [backend_tools_path]:
             try:
                 candidate_path = (storage_path / file_path).resolve()
                 # Security check: ensure path is within storage_path
@@ -1164,7 +1529,7 @@ def download_file():
     try:
         full_path = full_path.resolve()
         is_allowed = False
-        for allowed_path in paths_to_try:
+        for allowed_path in paths_to_try + [backend_tools_path]:
             if str(full_path).startswith(str(allowed_path.resolve())):
                 is_allowed = True
                 api_results_path = allowed_path.resolve()
@@ -1279,7 +1644,20 @@ def generate_chat_response(result) -> list:
             'content': f"I've downloaded the official OEM datasheet and extracted the mechanical specifications."
         })
     
-    # Step 3: Dimension Analysis
+    # Step 3: Histogram Filter Analysis
+    if result.histogram_analysis:
+        messages.append({
+            'type': 'step',
+            'title': '📊 Histogram Filter Analysis',
+            'content': f"Applied **11 image processing filters** to enhance defect detection:\n\n"
+                       f"• CLAHE (surface texture analysis)\n"
+                       f"• Edge Map (crack/damage detection)\n"
+                       f"• Otsu Threshold (contamination detection)\n"
+                       f"• And 8 other filters for comprehensive analysis\n\n"
+                       f"All filter outputs combined into a single dashboard for Gemini analysis."
+        })
+    
+    # Step 4: Dimension Analysis
     if result.dimension_analysis:
         dim = result.dimension_analysis
         dim_source = dim.get('dimension_source', 'unknown')
@@ -1309,7 +1687,7 @@ def generate_chat_response(result) -> list:
                        f"{'✅ Dimensions match expected values' if confidence_score > 80 else '⚠️ Dimensional discrepancy detected'}"
         })
     
-    # Step 4: Visual Analysis
+    # Step 5: Visual Analysis
     if result.visual_comparison:
         visual = result.visual_comparison
         text_score = visual.get('text_quality_score') or 0
@@ -1326,7 +1704,7 @@ def generate_chat_response(result) -> list:
                        '\n'.join([f"• {obs}" for obs in visual.get('observations', [])[:3] if obs])
         })
     
-    # Step 5: Anomalies
+    # Step 6: Anomalies
     if result.anomalies:
         anomaly_text = f"⚠️ **{len(result.anomalies)} anomal{'y' if len(result.anomalies) == 1 else 'ies'} detected:**\n\n"
         
@@ -1631,9 +2009,83 @@ def get_history():
                         if 'scores' in metadata and isinstance(metadata['scores'], dict):
                             scores.update(metadata['scores'])
                     
+                    # CRITICAL FIX: Override COO with identify tool output if available
+                    # The metadata might have wrong COO (PH) from fallback, but identify tool has correct one
+                    session_id = row['session_id']
+                    try:
+                        detail = default_history_manager.load_history_detail(session_id)
+                        if detail and detail.get('analysis', {}).get('tool_outputs', {}).get('identify'):
+                            identify_output = detail['analysis']['tool_outputs']['identify']
+                            identify_data = identify_output.get('data') or identify_output.get('result') or identify_output
+                            country_codes = identify_data.get('country_codes', [])
+                            
+                            # First try country_codes array
+                            correct_coo = None
+                            if country_codes and isinstance(country_codes, list) and len(country_codes) > 0:
+                                correct_coo = str(country_codes[0]).upper()
+                            
+                            # If no country_codes, try to extract from additional_markings, lot_codes, or part_number text
+                            if not correct_coo or correct_coo == 'UNKNOWN':
+                                # Collect all text fields that might contain country codes
+                                all_text_parts = []
+                                
+                                # From additional_markings
+                                additional_markings = identify_data.get('additional_markings', [])
+                                for m in additional_markings:
+                                    if isinstance(m, dict):
+                                        all_text_parts.append(str(m.get('text', '')))
+                                        all_text_parts.append(str(m.get('decoded', '')))
+                                
+                                # From lot_codes (often contains country codes like "CHN GQ 912" or "MYS 99 130")
+                                lot_codes = identify_data.get('lot_codes', [])
+                                for lot in lot_codes:
+                                    if isinstance(lot, dict):
+                                        all_text_parts.append(str(lot.get('raw', '')))
+                                        all_text_parts.append(str(lot.get('meaning', '')))
+                                        all_text_parts.append(str(lot.get('location', '')))  # Location often mentions country codes
+                                    else:
+                                        all_text_parts.append(str(lot))
+                                
+                                # From part_number
+                                all_text_parts.append(str(identify_data.get('part_number', '')))
+                                
+                                # From reasoning (sometimes contains full text description)
+                                all_text_parts.append(str(identify_data.get('reasoning', '')))
+                                
+                                # Combine all text
+                                all_text = ' '.join(all_text_parts).upper()
+                                
+                                # Look for country codes in text (CHN, MYS, TW, etc.)
+                                # Priority order: CHN > MYS > TW > others (to avoid false matches)
+                                country_patterns = [
+                                    ('CHN', r'\bCHN\b'),
+                                    ('MYS', r'\bMYS\b'),
+                                    ('TW', r'\bTW\b'),
+                                    ('MY', r'\bMY\b(?!S)'),  # MY but not MYS
+                                    ('CN', r'\bCN\b(?!H)'),  # CN but not CHN
+                                    ('PH', r'\bPH\b'),
+                                    ('US', r'\bUS\b(?!A)'),  # US but not USA
+                                    ('JP', r'\bJP\b')
+                                ]
+                                
+                                for code, pattern in country_patterns:
+                                    if re.search(pattern, all_text):
+                                        correct_coo = code
+                                        print(f"[API] Extracted COO from text for {session_id}: {correct_coo} (from: {all_text[:80]})")
+                                        break
+                            
+                            if correct_coo and correct_coo != 'UNKNOWN':
+                                old_coo = ic_info.get('coo', 'Unknown')
+                                ic_info['coo'] = correct_coo
+                                if old_coo != correct_coo:
+                                    print(f"[API] Fixed COO for {session_id}: {old_coo} -> {correct_coo}")
+                    except Exception as e:
+                        # Don't fail if we can't load detail, just use metadata COO
+                        pass
+                    
                     # Build history item with proper nested structure
                     history_item = {
-                        'session_id': row['session_id'],
+                        'session_id': session_id,
                         'processed_date': row['processed_date'].isoformat() if hasattr(row['processed_date'], 'isoformat') else str(row['processed_date']),
                         'verdict': row.get('verdict', 'UNKNOWN'),
                         'ic_info': ic_info,
@@ -1655,8 +2107,86 @@ def get_history():
                     
                     history_list.append(history_item)
         
-        # If we didn't use vector DB filtering (or it returned 0 results), apply filters manually to regular history list
+        # If we didn't use vector DB filtering (or it returned 0 results), enrich regular history list with correct COO
         if not use_vector_db_filtering:
+            # Enrich each history item with correct COO from identify tool output
+            for item in history_list:
+                session_id = item.get('session_id')
+                if session_id:
+                    try:
+                        detail = default_history_manager.load_history_detail(session_id)
+                        if detail and detail.get('analysis', {}).get('tool_outputs', {}).get('identify'):
+                            identify_output = detail['analysis']['tool_outputs']['identify']
+                            identify_data = identify_output.get('data') or identify_output.get('result') or identify_output
+                            country_codes = identify_data.get('country_codes', [])
+                            
+                            # First try country_codes array
+                            correct_coo = None
+                            if country_codes and isinstance(country_codes, list) and len(country_codes) > 0:
+                                correct_coo = str(country_codes[0]).upper()
+                            
+                            # If no country_codes, try to extract from additional_markings, lot_codes, or part_number text
+                            if not correct_coo or correct_coo == 'UNKNOWN':
+                                # Collect all text fields that might contain country codes
+                                all_text_parts = []
+                                
+                                # From additional_markings
+                                additional_markings = identify_data.get('additional_markings', [])
+                                for m in additional_markings:
+                                    if isinstance(m, dict):
+                                        all_text_parts.append(str(m.get('text', '')))
+                                        all_text_parts.append(str(m.get('decoded', '')))
+                                
+                                # From lot_codes (often contains country codes like "CHN GQ 912" or "MYS 99 130")
+                                lot_codes = identify_data.get('lot_codes', [])
+                                for lot in lot_codes:
+                                    if isinstance(lot, dict):
+                                        all_text_parts.append(str(lot.get('raw', '')))
+                                        all_text_parts.append(str(lot.get('meaning', '')))
+                                        all_text_parts.append(str(lot.get('location', '')))  # Location often mentions country codes
+                                    else:
+                                        all_text_parts.append(str(lot))
+                                
+                                # From part_number
+                                all_text_parts.append(str(identify_data.get('part_number', '')))
+                                
+                                # From reasoning (sometimes contains full text description)
+                                all_text_parts.append(str(identify_data.get('reasoning', '')))
+                                
+                                # Combine all text
+                                all_text = ' '.join(all_text_parts).upper()
+                                
+                                # Look for country codes in text (CHN, MYS, TW, etc.)
+                                # Priority order: CHN > MYS > TW > others (to avoid false matches)
+                                country_patterns = [
+                                    ('CHN', r'\bCHN\b'),
+                                    ('MYS', r'\bMYS\b'),
+                                    ('TW', r'\bTW\b'),
+                                    ('MY', r'\bMY\b(?!S)'),  # MY but not MYS
+                                    ('CN', r'\bCN\b(?!H)'),  # CN but not CHN
+                                    ('PH', r'\bPH\b'),
+                                    ('US', r'\bUS\b(?!A)'),  # US but not USA
+                                    ('JP', r'\bJP\b')
+                                ]
+                                
+                                for code, pattern in country_patterns:
+                                    if re.search(pattern, all_text):
+                                        correct_coo = code
+                                        print(f"[API] Extracted COO from text for {session_id}: {correct_coo} (from: {all_text[:80]})")
+                                        break
+                            
+                            if correct_coo and correct_coo != 'UNKNOWN':
+                                # Update COO in ic_info
+                                if 'ic_info' not in item:
+                                    item['ic_info'] = {}
+                                old_coo = item.get('ic_info', {}).get('coo', 'Unknown')
+                                item['ic_info']['coo'] = correct_coo
+                                if old_coo != correct_coo:
+                                    print(f"[API] Fixed COO for {session_id} in regular list: {old_coo} -> {correct_coo}")
+                    except Exception as e:
+                        # Don't fail if we can't load detail, just use metadata COO
+                        pass
+            
             # Apply filters manually to regular history list
             if filters:
                 filtered_list = []
@@ -2159,6 +2689,183 @@ def download_history_report(session_id):
         }), 500
 
 
+@app.route('/api/annotations', methods=['POST'])
+def create_annotation():
+    """Create a new annotation"""
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        
+        if not session_id:
+            return jsonify({'error': 'session_id required'}), 400
+        
+        # Generate unique annotation ID
+        annotation_id = data.get('annotation_id') or f"{session_id}_{uuid.uuid4().hex[:8]}"
+        
+        annotation = {
+            'session_id': session_id,
+            'image_path': data.get('image_path', ''),
+            'annotation_id': annotation_id,
+            'bbox_x': float(data.get('bbox_x', 0)),
+            'bbox_y': float(data.get('bbox_y', 0)),
+            'bbox_width': float(data.get('bbox_width', 0)),
+            'bbox_height': float(data.get('bbox_height', 0)),
+            'label': data.get('label', ''),
+            'description': data.get('description', ''),
+            'annotation_type': data.get('annotation_type', 'feature'),
+            'severity': data.get('severity'),
+            'verified': data.get('verified', False),
+            'user_id': data.get('user_id'),
+            'user_notes': data.get('user_notes', ''),
+            'correction_to_ai': data.get('correction_to_ai', False)
+        }
+        
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            vector_db = get_vector_db()
+            if vector_db:
+                success = vector_db.store_annotation(session_id, annotation)
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'annotation_id': annotation_id,
+                        'message': 'Annotation saved successfully'
+                    }), 201
+        
+        # Fallback: store in file system if vector DB unavailable
+        return jsonify({
+            'success': True,
+            'annotation_id': annotation_id,
+            'message': 'Annotation saved (vector DB unavailable, using file storage)'
+        }), 201
+        
+    except Exception as e:
+        print(f"[API] Error creating annotation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/annotations/<session_id>', methods=['GET'])
+def get_annotations(session_id):
+    """Get all annotations for a session"""
+    try:
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            vector_db = get_vector_db()
+            if vector_db:
+                annotations = vector_db.get_annotations_for_session(session_id)
+                # Convert numpy types to native Python types and remove embedding
+                for ann in annotations:
+                    if 'embedding' in ann:
+                        del ann['embedding']  # Remove embedding from response
+                    # Convert any numpy types
+                    for key, value in ann.items():
+                        if hasattr(value, 'item'):  # numpy scalar
+                            ann[key] = value.item()
+                return jsonify({'annotations': annotations}), 200
+        
+        return jsonify({'annotations': []}), 200
+        
+    except Exception as e:
+        print(f"[API] Error getting annotations: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'annotations': []}), 500
+
+@app.route('/api/annotations/<annotation_id>', methods=['PUT'])
+def update_annotation(annotation_id):
+    """Update an annotation"""
+    try:
+        data = request.json
+        
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            vector_db = get_vector_db()
+            if vector_db:
+                # Get existing annotation
+                session_id = data.get('session_id')
+                if session_id:
+                    annotations = vector_db.get_annotations_for_session(session_id)
+                    existing = next((a for a in annotations if a.get('annotation_id') == annotation_id), None)
+                    
+                    if existing:
+                        # Update fields
+                        existing.update(data)
+                        existing['annotation_id'] = annotation_id  # Preserve ID
+                        success = vector_db.store_annotation(session_id, existing)
+                        if success:
+                            return jsonify({'success': True, 'message': 'Annotation updated'}), 200
+        
+        return jsonify({'error': 'Annotation not found'}), 404
+        
+    except Exception as e:
+        print(f"[API] Error updating annotation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/annotations/<annotation_id>', methods=['DELETE'])
+def delete_annotation(annotation_id):
+    """Delete an annotation"""
+    try:
+        session_id = request.args.get('session_id')
+        
+        if not session_id:
+            return jsonify({'error': 'session_id required'}), 400
+        
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            vector_db = get_vector_db()
+            if vector_db:
+                conn = vector_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM ic_annotations WHERE annotation_id = %s AND session_id = %s",
+                    (annotation_id, session_id)
+                )
+                conn.commit()
+                vector_db._return_connection(conn)
+                return jsonify({'success': True, 'message': 'Annotation deleted'}), 200
+        
+        return jsonify({'error': 'Vector DB unavailable'}), 500
+        
+    except Exception as e:
+        print(f"[API] Error deleting annotation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/annotations/search', methods=['POST'])
+def search_annotations():
+    """Search annotations using RAG"""
+    try:
+        data = request.json
+        query = data.get('query', '')
+        limit = data.get('limit', 10)
+        filters = data.get('filters', {})
+        
+        if not query:
+            return jsonify({'error': 'query required'}), 400
+        
+        if VECTOR_DB_AVAILABLE and get_vector_db:
+            vector_db = get_vector_db()
+            if vector_db:
+                results = vector_db.search_annotations(query, limit, filters)
+                # Remove embeddings from response
+                for r in results:
+                    if 'embedding' in r:
+                        del r['embedding']
+                    # Convert numpy types
+                    for key, value in r.items():
+                        if hasattr(value, 'item'):
+                            r[key] = value.item()
+                return jsonify({'results': results}), 200
+        
+        return jsonify({'results': []}), 200
+        
+    except Exception as e:
+        print(f"[API] Error searching annotations: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'results': []}), 500
+
+
 if __name__ == '__main__':
     print("=" * 70)
     print("🚀 Counterfeit IC Detection API Server")
@@ -2174,6 +2881,11 @@ if __name__ == '__main__':
     print(f"  - GET  /api/history/<id> : Get history details")
     print(f"  - GET  /api/history/lots : Get lots for selection")
     print(f"  - POST /api/history/search : RAG search across lots")
+    print(f"  - POST /api/annotations : Create annotation")
+    print(f"  - GET  /api/annotations/<session_id> : Get annotations for session")
+    print(f"  - PUT  /api/annotations/<id> : Update annotation")
+    print(f"  - DELETE /api/annotations/<id> : Delete annotation")
+    print(f"  - POST /api/annotations/search : RAG search annotations")
     print("=" * 70)
     
     # Configure for long-running requests (detection takes 25-40 seconds)

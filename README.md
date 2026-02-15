@@ -225,26 +225,4 @@ The system supports parallel calls to VM-hosted VLMs:
 
 These endpoints are called in parallel with Gemini as a fallback mechanism.
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT License
-
-## Authors
-
-authentIC Team - SIH 2025
-
-## Acknowledgments
-
-- Google Gemini API for vision language model capabilities
-- Meta SAM 2.1 for segmentation
-- Ultralytics for YOLO models
-- EasyOCR for text recognition
-- ReportLab for PDF generation
-
----
-
 **Note**: This project was developed for Smart India Hackathon 2025.

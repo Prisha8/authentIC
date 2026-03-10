@@ -1,6 +1,6 @@
-# authentIC - AI-Powered Counterfeit IC Detection System
-
 ![SIH 2025 Banner](sih2025.jpg)
+
+# authentIC - AI-Powered Counterfeit IC Detection System
 
 ## Overview
 

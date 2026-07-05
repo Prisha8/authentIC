@@ -48,3 +48,6 @@ requirements.txt
 backend/tools/pipeline\ 2/sam2.1_b.pt
 backend/weights/sam2.1_b.pt
 weights/sam2.1_b.pt
+
+backend/dataset/*
+backend/weights/*

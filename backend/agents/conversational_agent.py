@@ -21,7 +21,8 @@ class ConversationalAgent:
     def __init__(self):
         api_key = get_api_key('GEMINI_API_KEY')
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')  # Using 2.5 flash for conversation
+        from utils.gemini_fallback import FallbackGenerativeModel
+        self.model = FallbackGenerativeModel('gemini-2.5-flash')  # Using 2.5 flash for conversation
         self.chat_sessions = {}  # Store chat histories per session
     
     def chat(self, 

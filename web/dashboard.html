@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>authentIC | Dashboard</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <script>
+    // Apply theme before first paint (dark is the default)
+    (function () {
+      var t = localStorage.getItem('authentIC_theme_v2') || 'dark';
+      if (t === 'dark') document.documentElement.classList.add('dark-mode');
+    })();
+  </script>
+
+  <!-- Using system fonts for offline support -->
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/chat.css">
+  <script>
+    // Define logout handler IMMEDIATELY so inline onclick can use it
+    window.handleLogout = async function(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+      // Public demo: no auth; return to the landing page
+      window.location.href = 'index.html';
+    };
+  </script>
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- TOP NAV (no search here) -->
+    <nav class="top-nav">
+      <div class="nav-left">
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="if(typeof toggleSidebar === 'function') { toggleSidebar(); } else { console.error('toggleSidebar not found'); }" title="Toggle Sidebar" aria-label="Toggle Sidebar" aria-expanded="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <a href="index.html" class="brand-link" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;">
+          <img src="assets/logo.png" alt="authentIC logo" style="width:28px;height:28px;" />
+          <div class="brand-title">authentIC</div>
+        </a>
+      </div>
+
+      <div class="nav-right">
+        <div class="nav-actions">
+          <!-- Dark Mode Toggle -->
+          <button class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" aria-label="Toggle dark mode">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+          </button>
+          
+          <div class="lang-dropdown">
+            <button class="lang-btn" id="langBtn" aria-label="Select Language">
+              <span id="langDisplay">ENG</span>
+              <span class="lang-arrow">▾</span>
+            </button>
+            <div class="lang-menu" id="langMenu">
+              <div class="lang-option" data-lang="en" data-code="ENG">English</div>
+              <div class="lang-option" data-lang="hi" data-code="हिं">Hindi (हिंदी)</div>
+              <div class="lang-option" data-lang="bn" data-code="বাং">Bengali (বাংলা)</div>
+              <div class="lang-option" data-lang="te" data-code="తె">Telugu (తెలుగు)</div>
+              <div class="lang-option" data-lang="mr" data-code="मर">Marathi (मराठी)</div>
+              <div class="lang-option" data-lang="ta" data-code="த">Tamil (தமிழ்)</div>
+              <div class="lang-option" data-lang="gu" data-code="ગુ">Gujarati (ગુજરાતી)</div>
+              <div class="lang-option" data-lang="kn" data-code="ಕ">Kannada (ಕನ್ನಡ)</div>
+              <div class="lang-option" data-lang="ml" data-code="മ">Malayalam (മലയാളം)</div>
+              <div class="lang-option" data-lang="pa" data-code="ਪੰ">Punjabi (ਪੰਜਾਬੀ)</div>
+              <div class="lang-option" data-lang="or" data-code="ଓ">Odia (ଓଡ଼ିଆ)</div>
+              <div class="lang-option" data-lang="ur" data-code="اردو">Urdu (اردو)</div>
+              <div class="lang-option" data-lang="as" data-code="অ">Assamese (অসমীয়া)</div>
+            </div>
+          </div>
+
+          <!-- mail icon -->
+          <button class="icon-btn" aria-label="Messages" title="Messages">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M3 6.5h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M21 6.5l-9 7-9-7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </button>
+
+          <!-- bell (notification icon) -->
+          <div class="notification-container" style="position: relative;">
+            <button class="icon-btn" id="notificationBtn" aria-label="Notifications" title="Notifications">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+            </button>
+            <div class="notification-dropdown" id="notificationDropdown" style="display: none;">
+              <div class="notification-dropdown-header">
+                <h3>Notifications</h3>
+                <button class="notification-clear-btn" id="notificationClearBtn" onclick="window.notificationService.clearAll()" style="display: none;">Clear All</button>
+              </div>
+              <div class="notification-list" id="notificationList">
+                <!-- Notifications will be populated here -->
+              </div>
+              <div class="notification-empty" id="notificationEmpty" style="display: block;">
+                <p>No notifications</p>
+              </div>
+            </div>
+          </div>
+
+          <button class="profile-btn" title="Profile" id="profileBtn">U</button>
+          <button class="icon-btn" id="logoutBtn" title="Logout" style="margin-left:10px" onclick="if(typeof window.handleLogout === 'function') { window.handleLogout(); } else { console.error('handleLogout not available'); }">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-resizer" id="sidebarResizer"></div>
+      <div class="sidebar-top">
+        <nav class="menu" aria-label="Main menu">
+          <button id="analyseIcsBtn" class="menu-item" type="button" style="cursor: pointer; border: none; width: 100%; text-align: left;" onclick="if(typeof window.switchView === 'function') { window.switchView('analyse'); return false; }">
+            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            <span data-i18n="nav.analyseICs" style="pointer-events: none;">Analyse ICs</span>
+          </button>
+
+          <button class="menu-item active" id="dashboardBtn" type="button" style="cursor: pointer; border: none; width: 100%; text-align: left;" onclick="if(typeof window.switchView === 'function') { window.switchView('dashboard'); return false; }">
+            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
+            <span data-i18n="nav.dashboard">Dashboard</span>
+          </button>
+
+          <button class="menu-item" id="searchChatsBtn" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;" onclick="if(typeof window.openRAGSearch === 'function') { window.openRAGSearch(); } else { console.error('openRAGSearch not available'); }">
+            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5A6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 20.5L21.5 19l-6-5z" fill="currentColor"/></svg>
+            <span data-i18n="nav.searchChats">Search Chats</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="chats">
+        <div class="chats-header">
+          <h4 data-i18n="nav.processedHistory">Processed History</h4>
+          <!-- Search Bar -->
+          <div class="history-search-container" id="historySearchContainer">
+            <input 
+              type="text" 
+              id="historySearchInput" 
+              class="history-search-input" 
+              placeholder="Search by part number, manufacturer, verdict..."
+              autocomplete="off"
+            >
+            <svg class="history-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"></path>
+            </svg>
+          </div>
+          <!-- Sort and Filter Controls -->
+          <div class="history-controls" id="historyControls">
+            <div class="history-sort-container">
+              <select id="historySortBy" class="history-sort-select" title="Sort by">
+                <option value="date-desc">Date (Newest First)</option>
+                <option value="date-asc">Date (Oldest First)</option>
+                <option value="score-desc">Score (High to Low)</option>
+                <option value="score-asc">Score (Low to High)</option>
+                <option value="part-number">Part Number (A-Z)</option>
+                <option value="manufacturer">Manufacturer (A-Z)</option>
+              </select>
+            </div>
+            <div class="history-filter-container">
+              <select id="filterVerdict" class="history-filter-select" title="Filter by verdict">
+                <option value="all">All Verdicts</option>
+                <option value="AUTHENTIC">Authentic</option>
+                <option value="SUSPICIOUS">Suspicious</option>
+                <option value="COUNTERFEIT">Counterfeit</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div id="processedHistoryList" class="processed-history-list">
+          <!-- History cards will be loaded dynamically -->
+        </div>
+        <div id="historyLoading" class="history-loading" style="display: none;">
+          <p>Loading more...</p>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <small>© 2025 authentIC</small>
+      </div>
+    </aside>
+
+
+    <!-- SEARCH OVERLAY MODAL (for personal users - kept for backward compatibility) -->
+    <div id="searchOverlay" class="search-overlay" style="display: none;">
+      <div class="search-modal">
+        <div class="search-modal-header">
+          <input type="text" id="searchChatInput" class="search-input" placeholder="Search chats..." autofocus />
+          <button class="search-close-btn" id="closeSearchBtn" aria-label="Close search">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="search-modal-content">
+          <button class="search-new-chat-btn" onclick="if(typeof window.switchView==='function'){window.switchView('analyse');}document.getElementById('searchOverlay')?.classList.remove('active'); return false;">
+            <svg class="menu-icon" width="18" height="18" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            <span data-i18n="nav.newChat">New Chat</span>
+          </button>
+          <div id="searchResults" class="search-results">
+            <!-- Search results will be populated here -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <main class="main">
+      <!-- SEARCH BAR - Top horizontal -->
+      <div class="search-bar-top">
+        <div class="search-container-top">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.35-4.35"></path>
+          </svg>
+          <input type="search" id="dashboardSearch" data-i18n-placeholder="dashboard.searchPlaceholder" placeholder="Search tasks, chips, serials..." />
+        </div>
+      </div>
+
+      <section class="dashboard-grid" id="dashboardGrid">
+        <!-- LEFT COLUMN: Hello + Upcoming Tasks -->
+        <div class="dashboard-left">
+          <!-- Combined Hello + Tasks Card -->
+          <div class="card welcome-tasks">
+            <div class="welcome-section">
+              <h2 data-i18n="dashboard.welcome">Hello, <span id="userName">User</span></h2>
+              <p class="muted" data-i18n="dashboard.pending">You have <strong id="pendingCount">0</strong> pending verifications today. Keep your supply chain safe.</p>
+            </div>
+            
+            <div class="tasks-section">
+              <h4 data-i18n="dashboard.upcomingTasks">Upcoming verifications</h4>
+              <ul class="events" id="upcomingTasksList">
+                <li class="empty-task">
+                  <div class="muted">No upcoming tasks</div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Dashboard Metrics OR Analyse ICs View -->
+        <div class="dashboard-right" id="dashboardRight">
+          <!-- Dashboard Metrics View -->
+          <div class="card metrics-combined" id="metricsCard">
+            <h3 data-i18n="dashboard.performance">Performance & Metrics</h3>
+            
+            <!-- KPIs Section (Circular Charts) -->
+            <div class="metrics-kpis">
+              <div class="kpi-item">
+                <svg viewBox="0 0 36 36" class="circular-chart">
+                  <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-visual" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <text x="18" y="20.35" class="chart-text" id="kpi-visual-text">0%</text>
+                </svg>
+                <div class="kpi-label">Visual Match</div>
+              </div>
+
+              <div class="kpi-item">
+                <svg viewBox="0 0 36 36" class="circular-chart">
+                  <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-metadata" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <text x="18" y="20.35" class="chart-text" id="kpi-metadata-text">0%</text>
+                </svg>
+                <div class="kpi-label">Avg Score</div>
+              </div>
+
+              <div class="kpi-item">
+                <svg viewBox="0 0 36 36" class="circular-chart">
+                  <path class="circle-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <path class="circle" id="kpi-dimension" stroke-dasharray="100 100" stroke-dashoffset="100" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831"/>
+                  <text x="18" y="20.35" class="chart-text" id="kpi-dimension-text">0%</text>
+                </svg>
+                <div class="kpi-label">Dimension Match</div>
+              </div>
+            </div>
+
+            <!-- Bell Curve Chart Section -->
+            <div class="metrics-chart-section">
+              <h4>Verdict Distribution</h4>
+              <p>Distribution of ICs across authenticity scores. Red (0-40): Counterfeit, Orange (40-70): Suspicious, Green (70-100): Authentic</p>
+              <canvas id="verdictBellCurveChart"></canvas>
+            </div>
+
+            <!-- Performance Bars Section -->
+            <div class="metrics-bars">
+              <div class="bar-row">
+                <div class="label">Total Processed</div>
+                <div class="bar">
+                  <div class="bar-fill" id="bar-total" style="width:0%"></div>
+                </div>
+                <div class="bar-value-text" id="bar-total-value">0</div>
+              </div>
+
+              <div class="bar-row">
+                <div class="label">Authentic Detected</div>
+                <div class="bar">
+                  <div class="bar-fill" id="bar-authentic" style="width:0%"></div>
+                </div>
+                <div class="bar-value-text" id="bar-authentic-value">0</div>
+              </div>
+
+              <div class="bar-row">
+                <div class="label">Suspicious Detected</div>
+                <div class="bar">
+                  <div class="bar-fill negative" id="bar-suspicious" style="width:0%"></div>
+                </div>
+                <div class="bar-value-text" id="bar-suspicious-value">0</div>
+              </div>
+
+              <div class="bar-row">
+                <div class="label">Avg Processing Time</div>
+                <div class="bar">
+                  <div class="bar-fill" id="bar-time" style="width:0%"></div>
+                </div>
+                <div class="bar-value-text" id="bar-time-value">0s</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Analyse ICs View (Split Pane) -->
+          <div class="analyse-view-container" id="analyseViewContainer" style="display: none;">
+            <div class="analyse-split-view">
+              <!-- Left: Input + Process Chain -->
+              <div class="analyse-left-pane">
+                <div class="analyse-content" id="analyseContent">
+                  <!-- Sample / demo ICs -->
+                  <div class="form-section" id="demoIcSection" style="display:none;">
+                    <label class="form-label">Try a sample IC</label>
+                    <div id="demoIcStrip" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
+                    <div style="font-size:.8rem;opacity:.65;margin-top:6px;">
+                      Sample analyses are free and do not count against your daily limit.
+                    </div>
+                  </div>
+
+                  <form id="analyseIcsForm" class="analyse-form">
+                    <div class="form-section">
+                      <label class="form-label">IC Image(s) *</label>
+                      <div class="image-upload-area">
+                        <input type="file" id="analyseImageInput" accept="image/*" multiple style="display: none;">
+                        <button type="button" class="upload-btn" onclick="document.getElementById('analyseImageInput').click()">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                          </svg>
+                          <span>Upload Image(s)</span>
+                        </button>
+                        <div id="analyseImagePreviews" class="image-previews-grid"></div>
+                      </div>
+                    </div>
+                    
+                    <div class="form-section">
+                      <label class="form-label">Additional Information (Optional)</label>
+                      <textarea id="analyseInfoInput" class="form-textarea" placeholder="Enter any additional information about the IC, markings, or context..."></textarea>
+                    </div>
+                    
+                    <div class="form-section">
+                      <label class="form-label">OEM PDF Datasheet (Optional)</label>
+                      <div class="pdf-upload-area">
+                        <input type="file" id="analysePdfInput" accept=".pdf" style="display: none;">
+                        <button type="button" class="upload-btn" onclick="document.getElementById('analysePdfInput').click()">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                          </svg>
+                          <span id="analysePdfFileName">Upload PDF</span>
+                        </button>
+                        <button type="button" id="removeAnalysePdfBtn" class="remove-file-btn" style="display: none;" onclick="removeAnalysePdf()">Remove</button>
+                      </div>
+                    </div>
+
+                    <!-- PCB/FPGA mode not available in the public web demo -->
+
+                    <div class="form-actions">
+                      <button type="submit" class="btn-submit" id="analyseSubmitBtn">Begin Analysis</button>
+                    </div>
+                  </form>
+                  
+                  <!-- Process Chain -->
+                  <div class="analyse-process-chain" id="analyseProcessChain" style="display: none;">
+                    <!-- Process chain will be rendered here -->
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Right: PDF Viewer -->
+              <div class="analyse-right-pane">
+                <div class="pdf-viewer-container" id="pdfViewerContainer">
+                  <div class="pdf-viewer-placeholder">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3;">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                    <p>OEM datasheet will appear here</p>
+                  </div>
+                  <!-- PDF Viewer -->
+                  <iframe id="pdfViewer" style="display: none;"></iframe>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BOTTOM: Share Processed Batches Card (Horizontal) -->
+        <div class="card share-analysis fullwidth">
+          <h4 data-i18n="dashboard.shareProcessedBatches">Share Processed Batches</h4>
+          <div class="share-suggestions" id="shareSuggestions">
+            <!-- Contacts will be dynamically loaded here -->
+            <div class="share-item add-recipient-item" onclick="openAddRecipientModal()">
+              <div class="share-avatar">+</div>
+              <div class="share-info">
+                <div class="share-name">Add Recipient</div>
+                <div class="share-role">Add a new contact to share with</div>
+              </div>
+              <button class="share-btn add-recipient" onclick="event.stopPropagation(); openAddRecipientModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add
+              </button>
+            </div>
+          </div>
+          
+          <!-- Share Lots Section -->
+          <div class="share-lots-section" id="shareLotsSection" style="display: none;">
+            <div class="share-lots-header">
+              <h5>Select Processing History Lots to Share</h5>
+              <button class="share-btn" onclick="shareSelectedAnalysis()" id="shareSelectedBtn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                  <polyline points="16 6 12 2 8 6"></polyline>
+                  <line x1="12" y1="2" x2="12" y2="15"></line>
+                </svg>
+                Send Analysis
+              </button>
+            </div>
+            <div class="share-lots-list" id="shareLotsList">
+              <!-- Lots will be dynamically loaded here -->
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+
+  <!-- History Detail Modal -->
+  <div id="historyDetailModal" class="history-detail-modal" style="display: none;">
+    <div class="modal-overlay" onclick="if(typeof window.closeHistoryDetailModal === 'function') { window.closeHistoryDetailModal(); }"></div>
+    <div class="modal-content-detail">
+      <div class="modal-header">
+        <h2>Processing Details</h2>
+        <button class="modal-close" onclick="if(typeof window.closeHistoryDetailModal === 'function') { window.closeHistoryDetailModal(); }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div id="historyDetailContent" class="modal-body-detail">
+        <!-- Process chain and summary will be rendered here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Suspicious IC Review Modal -->
+  <div id="suspiciousICModal" class="suspicious-ic-modal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="suspicious-modal-content">
+      <div class="suspicious-modal-header">
+        <h2 class="suspicious-modal-title">IC Review</h2>
+        <button class="suspicious-modal-close" onclick="if(typeof window.closeSuspiciousICModal === 'function') { window.closeSuspiciousICModal(); }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="suspicious-modal-body">
+        <div class="suspicious-modal-date"></div>
+        <div style="margin-bottom: 12px;">
+          <button class="annotation-toggle-btn" id="suspiciousModalAnnotateBtn" onclick="toggleSuspiciousModalAnnotation()">
+            📝 Annotate Image
+          </button>
+        </div>
+        <div class="suspicious-modal-main">
+          <div class="suspicious-modal-image" id="suspiciousModalImageContainer">
+            <img src="" alt="IC Image" id="suspiciousModalImage" />
+          </div>
+          <div class="suspicious-modal-pdf">
+            <iframe src="" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
+            <div class="suspicious-modal-pdf-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted);">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3; margin-bottom: 16px;">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+              <p>No OEM datasheet available</p>
+            </div>
+          </div>
+        </div>
+        <div class="suspicious-modal-actions">
+          <button class="suspicious-modal-verdict-btn verdict-counterfeit" onclick="if(typeof window.handleManualVerdict === 'function') { const sessionId = this.dataset.sessionId; if(sessionId) window.handleManualVerdict(sessionId, 'COUNTERFEIT'); }">
+            Mark as Counterfeit
+          </button>
+          <button class="suspicious-modal-verdict-btn verdict-authentic" onclick="if(typeof window.handleManualVerdict === 'function') { const sessionId = this.dataset.sessionId; if(sessionId) window.handleManualVerdict(sessionId, 'AUTHENTIC'); }">
+            Mark as Authentic
+          </button>
+        </div>
+        <div class="suspicious-modal-note">
+          <small>This action will mark the IC as manually reviewed</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Recipient Modal -->
+  <div id="addRecipientModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2>Add Recipient</h2>
+        <button class="modal-close" onclick="closeAddRecipientModal()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="addRecipientForm" onsubmit="event.preventDefault(); addRecipient();">
+          <div class="form-group">
+            <label for="recipientName">Name *</label>
+            <input type="text" id="recipientName" class="form-input" required placeholder="Enter full name">
+          </div>
+          <div class="form-group">
+            <label for="recipientPosition">Position</label>
+            <input type="text" id="recipientPosition" class="form-input" placeholder="e.g., Quality Manager">
+          </div>
+          <div class="form-group">
+            <label for="recipientEmail">Email *</label>
+            <input type="email" id="recipientEmail" class="form-input" required placeholder="Enter email address">
+          </div>
+          <div class="form-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+            <button type="button" class="btn-secondary" onclick="closeAddRecipientModal()">Cancel</button>
+            <button type="submit" class="btn-primary">Add Recipient</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAG Search Overlay (Enhanced Search Chats) -->
+  <div id="ragSearchOverlay" class="rag-search-overlay" style="display: none;">
+    <div class="rag-search-modal">
+      <div class="rag-search-header-bar">
+        <h3>Search Across Processed Lots</h3>
+        <button class="rag-search-close" onclick="if(typeof window.closeRAGSearch === 'function') { window.closeRAGSearch(); }">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="rag-search-container">
+        <!-- Left Panel: Lot Selection -->
+        <div class="rag-search-left">
+          <div class="rag-lot-search-container">
+            <input 
+              type="text" 
+              id="ragLotSearch" 
+              class="rag-lot-search-input" 
+              placeholder="Search lots..."
+            >
+          </div>
+          <div id="ragLotSelection" class="rag-lot-selection">
+            <div class="rag-lot-header">
+              <h4>Select Knowledge Groups</h4>
+              <p class="rag-lot-subtitle">You can select multiple knowledge groups for cross-search</p>
+            </div>
+            <div class="rag-empty">Loading lots...</div>
+            <div class="rag-lot-footer">
+              <div class="rag-usage-tips">
+                <h5>Usage Tips</h5>
+                <ul>
+                  <li>Multiple knowledge groups can be selected</li>
+                  <li>Get comprehensive answers with cross-search</li>
+                  <li>Specific questions improve accuracy</li>
+                  <li>Check references on the right side</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Center Panel: Query and Answer -->
+        <div class="rag-search-center">
+          <div id="ragSearchPanel" class="rag-search-panel">
+            <div class="rag-search-header">
+              <h4>Ask Questions</h4>
+              <p class="rag-search-subtitle">Select knowledge groups to start searching</p>
+            </div>
+            <div class="rag-search-input-container">
+              <input 
+                type="text" 
+                id="ragQueryInput" 
+                class="rag-query-input" 
+                placeholder="Select knowledge groups first..."
+                disabled
+              >
+              <button 
+                class="rag-search-btn" 
+                id="ragSearchBtn"
+                disabled
+                title="Send"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Right Panel: Reference Chunks -->
+        <div class="rag-search-right">
+          <div id="ragReferences" class="rag-references">
+            <div class="rag-references-header">
+              <h4>Reference Chunks</h4>
+              <p class="rag-references-subtitle">Document sections that served as the basis for the response</p>
+            </div>
+            <div class="rag-empty">No references yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart.js for bell curve visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Notification Service -->
+  <script src="js/notification-service.js"></script>
+  <!-- switchView is defined in dashboard-query.js which loads below -->
+  <!-- Static Translations -->
+  <script src="js/translations.js"></script>
+  <!-- Translation API (uses static + API fallback) -->
+  <script src="js/translate-api.js"></script>
+  <!-- Dark Mode -->
+  <script src="js/dark-mode.js"></script>
+  <!-- API Client -->
+  <script src="js/api-client.js"></script>
+  <!-- History Detail Modal -->
+  <!-- Load simple version first to ensure function is available -->
+  <script src="js/history-detail-simple.js"></script>
+  <script src="js/history-detail.js"></script>
+  <!-- RAG Search - Load once, check if already loaded -->
+  <script>
+    (function() {
+      // Check if already loaded
+      if (typeof window.initRAGSearch === 'function') {
+        console.log('[Dashboard] ✓ RAG search already loaded');
+        return;
+      }
+      
+      // Check if script tag already exists
+      const existingScript = document.querySelector('script[src*="rag-search.js"]');
+      if (existingScript) {
+        console.log('[Dashboard] RAG search script tag already exists, waiting for load...');
+        existingScript.addEventListener('load', function() {
+          if (typeof window.initRAGSearch === 'function') {
+            console.log('[Dashboard] ✓ initRAGSearch available after existing script loaded');
+          }
+        });
+        return;
+      }
+      
+      // Load the script
+      const script = document.createElement('script');
+      script.src = 'js/rag-search.js';
+      script.async = false;
+      script.defer = false;
+      script.onload = function() {
+        console.log('[Dashboard] RAG search script loaded');
+        if (typeof window.initRAGSearch === 'function') {
+          console.log('[Dashboard] ✓ initRAGSearch is available');
+        } else {
+          console.error('[Dashboard] ✗ initRAGSearch NOT available after script load');
+        }
+      };
+      script.onerror = function() {
+        console.error('[Dashboard] ✗ Failed to load rag-search.js');
+      };
+      document.head.appendChild(script);
+    })();
+  </script>
+  <!-- Dashboard Query Functionality -->
+  <!-- Load dashboard-query.js FIRST to define switchView early -->
+  <script src="js/annotation-tool.js"></script>
+  <script src="js/dashboard-query.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/chat-widget.js"></script>
+  <script>
+    // Verify RAG search functions are loaded
+    (function() {
+      // Check immediately
+      if (typeof window.initRAGSearch === 'function' || window.ragSearchReady) {
+        console.log('[Dashboard] ✓ RAG search functions loaded successfully');
+      } else {
+        // Listen for ready event
+        document.addEventListener('ragSearchReady', function() {
+          console.log('[Dashboard] ✓ RAG search ready event received');
+        });
+        // Also check after a short delay
+        setTimeout(function() {
+          if (typeof window.initRAGSearch === 'function') {
+            console.log('[Dashboard] ✓ RAG search functions loaded (delayed check)');
+          } else {
+            console.warn('[Dashboard] ⚠ RAG search functions may not be loaded');
+          }
+        }, 500);
+      }
+    })();
+  </script>
+  <script>
+    // RAG Search functions (for business users)
+    window.openRAGSearch = function() {
+      const userType = localStorage.getItem('authentIC_userType');
+      
+      if (userType === 'business') {
+        const overlay = document.getElementById('ragSearchOverlay');
+        if (overlay) {
+          overlay.style.display = 'flex';
+          
+          // Function to initialize RAG search with retry logic and auto-reload
+          const doInit = (retries = 30) => {
+            if (typeof window.initRAGSearch === 'function') {
+              console.log('[Dashboard] ✓ Calling initRAGSearch...');
+              try {
+                window.initRAGSearch();
+              } catch (error) {
+                console.error('[Dashboard] Error calling initRAGSearch:', error);
+                const searchPanel = document.getElementById('ragSearchPanel');
+                if (searchPanel) {
+                  searchPanel.innerHTML = '<div class="rag-empty">Error: ' + error.message + '</div>';
+                }
+              }
+            } else if (retries > 0) {
+              if (retries % 5 === 0 || retries < 5) {
+                console.log(`[Dashboard] initRAGSearch not available, retrying... (${retries} left)`);
+              }
+              setTimeout(() => doInit(retries - 1), 100);
+            } else {
+              console.error('[Dashboard] ❌ initRAGSearch not available after retries');
+              console.error('[Dashboard] ragSearchReady:', window.ragSearchReady);
+              console.error('[Dashboard] RAG-related keys:', Object.keys(window).filter(k => k.toLowerCase().includes('rag')));
+              console.error('[Dashboard] RAG_SEARCH_LOADED:', window.RAG_SEARCH_LOADED);
+              
+              // Don't reload - check if script loaded but export failed
+              // Check for JavaScript errors in console
+              showError();
+              
+              function showError() {
+                const lotPanel = document.getElementById('ragLotSelection');
+                const searchPanel = document.getElementById('ragSearchPanel');
+                if (lotPanel) {
+                  lotPanel.innerHTML = '<div class="rag-empty">Error: RAG search script not loaded.<br>Please refresh the page.</div>';
+                }
+                if (searchPanel) {
+                  searchPanel.innerHTML = '<div class="rag-empty">Error: RAG search script not loaded.</div>';
+                }
+              }
+            }
+          };
+          
+          // Start initialization
+          doInit();
+        }
+      } else {
+        // Personal users - use old search overlay
+        const overlay = document.getElementById('searchOverlay');
+        if (overlay) {
+          overlay.style.display = 'flex';
+        }
+      }
+    };
+
+    window.closeRAGSearch = function() {
+      const overlay = document.getElementById('ragSearchOverlay');
+      if (overlay) {
+        overlay.style.display = 'none';
+        // Reset state when closing
+        if (typeof window.ragSearchState !== 'undefined' && window.ragSearchState.reset) {
+          window.ragSearchState.reset();
+        }
+      }
+    };
+
+    // Close RAG search on overlay click and Escape key
+    document.addEventListener('DOMContentLoaded', () => {
+      const ragOverlay = document.getElementById('ragSearchOverlay');
+      if (ragOverlay) {
+        ragOverlay.addEventListener('click', (e) => {
+          if (e.target === ragOverlay) {
+            if (typeof window.closeRAGSearch === 'function') {
+              window.closeRAGSearch();
+            }
+          }
+        });
+      }
+      
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const overlay = document.getElementById('ragSearchOverlay');
+          if (overlay && overlay.style.display === 'flex') {
+            if (typeof window.closeRAGSearch === 'function') {
+              window.closeRAGSearch();
+            }
+          }
+        }
+      });
+    });
+  </script>
+</body>
+</html>

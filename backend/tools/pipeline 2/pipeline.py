@@ -22,6 +22,45 @@ from ultralytics import SAM
 from PIL import Image
 import easyocr
 
+# Model caches so warm processes (GPU worker containers) load weights only once
+_SAM_MODELS = {}
+_EASYOCR_READER = None
+
+
+def _get_sam_model(sam_model_path):
+    if sam_model_path not in _SAM_MODELS:
+        _SAM_MODELS[sam_model_path] = SAM(sam_model_path)
+    return _SAM_MODELS[sam_model_path]
+
+
+def _get_easyocr_reader():
+    """EasyOCR reader with GPU auto-detection and optional pre-baked model dir.
+
+    Env:
+        EASYOCR_GPU: 'true'/'false' to force; default = torch.cuda.is_available()
+        EASYOCR_MODEL_DIR: directory with craft/english weights (skips download)
+    """
+    global _EASYOCR_READER
+    if _EASYOCR_READER is None:
+        gpu_env = os.getenv("EASYOCR_GPU", "").strip().lower()
+        if gpu_env in ("true", "1", "yes"):
+            use_gpu = True
+        elif gpu_env in ("false", "0", "no"):
+            use_gpu = False
+        else:
+            try:
+                import torch
+                use_gpu = torch.cuda.is_available()
+            except ImportError:
+                use_gpu = False
+        model_dir = os.getenv("EASYOCR_MODEL_DIR") or None
+        kwargs = {"gpu": use_gpu}
+        if model_dir:
+            kwargs["model_storage_directory"] = model_dir
+            kwargs["download_enabled"] = False
+        _EASYOCR_READER = easyocr.Reader(['en'], **kwargs)
+    return _EASYOCR_READER
+
 
 def detect_ic(image_path, sam_model_path="sam2.1_b.pt"):
     """
@@ -35,7 +74,7 @@ def detect_ic(image_path, sam_model_path="sam2.1_b.pt"):
         ic_crop: Cropped IC region as numpy array, or None if detection fails
     """
     print(f"[Step 1] Loading SAM model...")
-    model = SAM(sam_model_path)
+    model = _get_sam_model(sam_model_path)
     
     print(f"[Step 1] Segmenting IC from {image_path}...")
     results = model(image_path)
@@ -94,7 +133,7 @@ def detect_textbox(ic_image):
         rect: The detected rotated rectangle (for debugging)
     """
     print("[Step 2] Detecting text region using EasyOCR...")
-    reader = easyocr.Reader(['en'], gpu=True)
+    reader = _get_easyocr_reader()
     results = reader.readtext(ic_image)
     
     # Create visualization image with bounding boxes

@@ -27,37 +27,50 @@ except ImportError:
     NUMPY_AVAILABLE = False
     print("[VectorDB] Warning: numpy not available. Vector DB functionality disabled.")
 
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    print("[VectorDB] Warning: sentence-transformers not available. Vector DB functionality disabled.")
+# Embedding backends (same model, same 384-dim output, same DB schema):
+#   fastembed (default): ONNX runtime, no torch — right for the 8GB web host
+#   sentence-transformers: original desktop path, pulls torch
+# Select with EMBEDDING_BACKEND=fastembed|sentence-transformers
+import os as _os
+_EMBEDDING_BACKEND = _os.getenv("EMBEDDING_BACKEND", "fastembed").strip().lower()
 
-# Initialize sentence transformer model for embeddings
-# Using a lightweight model for better performance
+FASTEMBED_AVAILABLE = False
+SENTENCE_TRANSFORMERS_AVAILABLE = False
+if _EMBEDDING_BACKEND == "fastembed":
+    try:
+        from fastembed import TextEmbedding
+        FASTEMBED_AVAILABLE = True
+    except ImportError:
+        print("[VectorDB] fastembed not available, trying sentence-transformers...")
+if not FASTEMBED_AVAILABLE:
+    try:
+        from sentence_transformers import SentenceTransformer
+        SENTENCE_TRANSFORMERS_AVAILABLE = True
+    except ImportError:
+        print("[VectorDB] Warning: no embedding backend available. Vector DB functionality disabled.")
+
+EMBEDDINGS_AVAILABLE = FASTEMBED_AVAILABLE or SENTENCE_TRANSFORMERS_AVAILABLE
+
 EMBEDDING_MODEL = None
 
 def get_embedding_model():
-    """Lazy load the embedding model"""
-    if not SENTENCE_TRANSFORMERS_AVAILABLE:
-        raise ImportError("sentence-transformers is required but not installed")
-    
+    """Lazy load the embedding model (all-MiniLM-L6-v2, 384 dims)."""
+    if not EMBEDDINGS_AVAILABLE:
+        raise ImportError("No embedding backend (fastembed or sentence-transformers) installed")
+
     global EMBEDDING_MODEL
     if EMBEDDING_MODEL is None:
-        try:
-            # Using a lightweight model - can be changed to larger models for better quality
-            EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-            print("[VectorDB] Loaded embedding model: all-MiniLM-L6-v2")
-        except Exception as e:
-            print(f"[VectorDB] Error loading embedding model: {e}")
-            # Fallback to a smaller model if available
+        if FASTEMBED_AVAILABLE:
+            EMBEDDING_MODEL = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+            print("[VectorDB] Loaded fastembed model: all-MiniLM-L6-v2 (ONNX)")
+        else:
             try:
+                EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
+                print("[VectorDB] Loaded embedding model: all-MiniLM-L6-v2")
+            except Exception as e:
+                print(f"[VectorDB] Error loading embedding model: {e}")
                 EMBEDDING_MODEL = SentenceTransformer('paraphrase-MiniLM-L3-v2')
                 print("[VectorDB] Loaded fallback embedding model")
-            except Exception as e2:
-                print(f"[VectorDB] Failed to load fallback model: {e2}")
-                raise
     return EMBEDDING_MODEL
 
 class VectorDB:
@@ -247,12 +260,15 @@ class VectorDB:
     
     def _generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """Generate embedding vector for text"""
-        if not SENTENCE_TRANSFORMERS_AVAILABLE:
-            print("[VectorDB] sentence-transformers not available, cannot generate embeddings")
+        if not EMBEDDINGS_AVAILABLE:
+            print("[VectorDB] No embedding backend available, cannot generate embeddings")
             return None
         try:
             model = get_embedding_model()
-            embedding = model.encode(text, convert_to_numpy=True)
+            if FASTEMBED_AVAILABLE:
+                embedding = next(iter(model.embed([text])))
+            else:
+                embedding = model.encode(text, convert_to_numpy=True)
             return embedding.tolist()  # Convert to list for PostgreSQL
         except Exception as e:
             print(f"[VectorDB] Error generating embedding: {e}")

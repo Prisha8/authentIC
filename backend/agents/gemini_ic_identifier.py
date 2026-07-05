@@ -29,7 +29,8 @@ def setup_gemini(api_key: str):
     
     # Use Gemini 2.5 Flash (free tier: 15 RPM, 1M TPM, 1500 RPD)
     # Model name for 2.5 flash
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    from utils.gemini_fallback import FallbackGenerativeModel
+    model = FallbackGenerativeModel('gemini-2.5-flash')
     return model
 
 
@@ -137,8 +138,27 @@ Important:
 - Decode date codes, lot codes, and other codes when possible
 - Be precise with part numbers (they are critical for finding the right datasheet)
 - Look carefully at manufacturer logos or text
-- Count pins carefully (especially important for package identification)
 - Provide decoded meanings for all codes you extract
+
+Package type and pin count — follow these rules strictly:
+- First decide the package FAMILY from the physical leads: leads on only TWO
+  sides = DIP (through-hole legs) or SOIC/SOP (surface-mount gull-wing);
+  leads on all FOUR sides = QFP/LQFP/TQFP; no visible leads = QFN/BGA.
+- Then COUNT the visible pins: count the pins along one side and multiply by
+  the number of pinned sides. Do this before writing pin_count.
+- pin_count MUST be what you physically SEE in the image — never the pin
+  count the part number implies. Counterfeiters re-mark chips with part
+  numbers of different devices, so the marking cannot be trusted for the
+  pin count.
+- Cross-check anyway: the package suffix in the part number encodes the
+  standard package (e.g. STM32F103RCT6 ends in T6 = LQFP-64). If your visual
+  count CONFLICTS with the standard package for that part number, still
+  report the visual count in pin_count, and state the conflict explicitly in
+  "reasoning" and "condition_notes" — it is a counterfeit red flag.
+- pin_count should normally be a standard value (4, 6, 8, 14, 16, 18, 20, 24,
+  28, 32, 44, 48, 64, 80, 100, 144, 176, 208). If your count is not standard,
+  recount carefully — but if recounting still gives a non-standard number,
+  report what you see.
 """
     
     # Add additional info if provided
@@ -160,7 +180,10 @@ Please consider this additional information when identifying the IC. Use it to:
     
     for attempt in range(max_retries):
         try:
-            response = model.generate_content([prompt, img])
+            response = model.generate_content(
+                [prompt, img],
+                generation_config={"temperature": 0.1},
+            )
             response_text = response.text
             break
         except exceptions.ResourceExhausted as e:

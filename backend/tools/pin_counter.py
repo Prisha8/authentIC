@@ -53,13 +53,19 @@ class PinCounterResult:
         return data
 
 
+_MODEL_CACHE: Dict[str, YOLO] = {}
+
+
 def _load_model(weights_path: Path) -> YOLO:
     if not weights_path.exists():
         raise FileNotFoundError(
             f"Pin counter weights not found at: {weights_path}. "
             "Set PIN_COUNTER_WEIGHTS_PATH or pass weights_path explicitly."
         )
-    return YOLO(str(weights_path))
+    key = str(weights_path.resolve())
+    if key not in _MODEL_CACHE:
+        _MODEL_CACHE[key] = YOLO(key)
+    return _MODEL_CACHE[key]
 
 
 def _build_overlay(result, pin_count: int, notch_count: int, detections: List[PinDetection]) -> np.ndarray:

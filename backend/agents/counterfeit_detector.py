@@ -45,15 +45,51 @@ except ImportError:
 backend_path = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_path))
 
+# Full-resolution PNGs embedded straight into the PDF produce 30-40MB reports;
+# downsample to JPEG before handing paths to ReportLab.
+_PDF_TMP_IMAGES = []
+
+
+def _cleanup_pdf_images():
+    global _PDF_TMP_IMAGES
+    for p in _PDF_TMP_IMAGES:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+    _PDF_TMP_IMAGES = []
+
+
+def _shrink_for_pdf(path, max_dim=1400, quality=80):
+    try:
+        import tempfile
+        p = str(path)
+        img = Image.open(p)
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        else:
+            img = img.convert("RGB")
+        img.thumbnail((max_dim, max_dim))
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        img.save(tmp.name, "JPEG", quality=quality)
+        tmp.close()
+        _PDF_TMP_IMAGES.append(tmp.name)
+        return tmp.name
+    except Exception:
+        return str(path)
+
 from utils import get_api_key
 from tools.datasheet_scraper import DatasheetScraper
 from tools.datasheet_parser import DatasheetParser
-from tools.dimension_estimator import estimate_dimensions, DimensionResult
-from tools.pin_counter import PinCounterResult, run_pin_counter
 from agents.gemini_ic_identifier import identify_ic, setup_gemini
-from tools.histogram_filter_tool import run_histogram_pipeline
-from tools.create_histogram_dashboard import create_histogram_dashboard
-from tools.analyze_histogram_stats import generate_histogram_analysis_json
+
+# NOTE: torch-dependent tools (dimension_estimator, pin_counter, histogram_filter_tool,
+# create_histogram_dashboard, analyze_histogram_stats) are imported lazily inside the
+# methods that use them so this module can be imported on hosts without torch installed
+# (the web server offloads those stages to a GPU worker instead).
 
 
 @dataclass
@@ -124,7 +160,10 @@ class CounterfeitDetector:
         api_key = get_api_key("GEMINI_API_KEY")
         self.identifier_model = setup_gemini(api_key)  # For IC identification
         genai.configure(api_key=api_key)
-        self.analysis_model = genai.GenerativeModel('gemini-2.5-flash')  # For visual analysis
+        from utils.gemini_fallback import FallbackGenerativeModel
+        # Low temperature: verdict reasoning must be stable run-to-run
+        self.analysis_model = FallbackGenerativeModel(
+            'gemini-2.5-flash', generation_config={"temperature": 0.2})  # For visual analysis
         
         print(f"✅ Counterfeit Detector initialized")
         print(f"   Output directory: {self.output_dir}")
@@ -296,13 +335,40 @@ class CounterfeitDetector:
         try:
             scraper = DatasheetScraper(output_dir=str(self.output_dir / "datasheets"))
             result = scraper.scrape(part_number)
-            
+
             if result and result.get('pdf_path'):
-                return result['pdf_path']
+                pdf_path = result['pdf_path']
+                if not self._datasheet_matches_part(pdf_path, part_number):
+                    print(f"⚠️  Downloaded datasheet does not mention '{part_number}' — "
+                          f"discarding it (wrong datasheet is worse than none)")
+                    return None
+                return pdf_path
             return None
         except Exception as e:
             print(f"⚠️  Scraping failed: {e}")
             return None
+
+    @staticmethod
+    def _datasheet_matches_part(pdf_path: str, part_number: str) -> bool:
+        """A datasheet for the wrong part turns every downstream comparison into
+        a false anomaly. Accept the PDF only if a meaningful prefix of the
+        identified part number appears in its text."""
+        try:
+            import fitz  # PyMuPDF
+            import re as _re
+            root = _re.sub(r'[^A-Za-z0-9]', '', part_number or '').upper()
+            if len(root) < 4:
+                return True  # part number too short/uncertain to validate against
+            with fitz.open(pdf_path) as doc:
+                text = "".join(page.get_text() for page in doc[:8]).upper()
+            text = _re.sub(r'[^A-Za-z0-9]', '', text)
+            for cut in range(len(root), max(5, len(root) - 6) - 1, -1):
+                if root[:cut] in text:
+                    return True
+            return False
+        except Exception as e:
+            print(f"⚠️  Datasheet validation skipped ({e})")
+            return True  # fail open: keep prior behaviour if validation breaks
     
     def _parse_datasheet(self, pdf_path: str, part_number: str, 
                          package_type: str, pin_count: int, manufacturer: str = None) -> Tuple[Optional[str], Optional[Dict]]:
@@ -534,7 +600,7 @@ If you cannot find a suitable outline dimension page, return null for outline_pa
                     print(f"  ✓ Gemini identified outline diagram on page {page_num} (confidence: {confidence})")
                     if reasoning:
                         print(f"    Reasoning: {reasoning}")
-                    return int(page_num)
+                    return self._reconcile_outline_page(pdf_path, int(page_num), package_type, pin_count)
                 else:
                     print(f"  ⚠️  Gemini could not identify outline diagram page")
                     return None
@@ -548,6 +614,68 @@ If you cannot find a suitable outline dimension page, return null for outline_pa
             traceback.print_exc()
             return None
     
+    # Multi-variant datasheets (e.g. STM32: LQFP64/LQFP100/BGA in one PDF) trip
+    # the page picker into returning the wrong package's outline, which then
+    # produces false "package mismatch" anomalies. Cross-check the picked page's
+    # text against the identified package family and rescan if it disagrees.
+    _PKG_FAMILIES = [
+        ("LQFP", ["LQFP"]), ("TQFP", ["TQFP"]), ("QFP", ["QFP"]),
+        ("QFN", ["QFN"]), ("BGA", ["BGA"]),
+        ("TSSOP", ["TSSOP"]), ("SSOP", ["SSOP"]),
+        ("SOIC", ["SOIC", "SOP", "SO-"]), ("DIP", ["DIP", "PDIP"]),
+    ]
+
+    def _reconcile_outline_page(self, pdf_path: str, page_num: int,
+                                package_type: str, pin_count: int) -> int:
+        try:
+            import fitz
+            pkg = (package_type or "").upper()
+            tokens = next((t for fam, t in self._PKG_FAMILIES if fam in pkg), [])
+            if not tokens:
+                return page_num
+            with fitz.open(pdf_path) as doc:
+                if not (1 <= page_num <= len(doc)):
+                    return page_num
+                page_text = doc[page_num - 1].get_text().upper()
+                if any(tok in page_text for tok in tokens):
+                    return page_num  # picked page matches the identified family
+
+                # rescan: find the drawing/mechanical-data page for the right family
+                def score_page(text):
+                    # TOCs and revision histories name every figure/table — skip them
+                    if ("REVISION HISTORY" in text or "LIST OF FIGURES" in text
+                            or "LIST OF TABLES" in text or "TABLE OF CONTENTS" in text):
+                        return 0
+                    tc = text.replace(" ", "").replace("-", "")
+                    s = 0
+                    if pin_count and any(f"{tok}{pin_count}" in tc for tok in tokens):
+                        s += 3  # e.g. "LQFP64" — the exact variant
+                    elif any(tok in text for tok in tokens):
+                        s += 1
+                    else:
+                        return 0
+                    if "OUTLINE" in text:
+                        s += 1
+                    if "MECHANICAL DATA" in text or "SEATING PLANE" in text:
+                        s += 2
+                    if "MILLIMETERS" in text:
+                        s += 1
+                    return s
+
+                best, best_score = None, 0
+                for i in range(len(doc)):
+                    s = score_page(doc[i].get_text().upper())
+                    if s >= best_score and s > 0:  # ties -> later page (TOCs sit up front)
+                        best, best_score = i + 1, s
+                if best and best_score >= 4:
+                    print(f"  ⚠ Page {page_num} does not mention {tokens[0]} — "
+                          f"using page {best} instead (matches package variant + drawing terms)")
+                    return best
+            return page_num
+        except Exception as e:
+            print(f"  ⚠ Outline page reconciliation skipped ({e})")
+            return page_num
+
     def _extract_dimensions_with_gemini(self, diagram_path: str) -> Optional[Dict]:
         """Use Gemini VLM to extract dimensions from mechanical diagram
         
@@ -627,6 +755,7 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
             (dimension_dict, visualization_path)
         """
         try:
+            from tools.dimension_estimator import estimate_dimensions
             # Get expected dimensions from Gemini extraction or datasheet parser
             expected_length = None
             expected_width = None
@@ -718,6 +847,8 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
     def _run_pin_counter(self, image_path: Path) -> Tuple[Dict, Optional[str]]:
         """Run the YOLO pin counter to get counts + visualization."""
         try:
+            from tools.pin_counter import PinCounterResult, run_pin_counter
+
             if not self.pin_counter_weights:
                 print("  ⚠️  No pin counter weights configured - skipping.")
                 return {}, None
@@ -747,6 +878,10 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
     def _run_histogram_filter(self, image_path: Path, result: DetectionResult) -> Tuple[Dict, Optional[str], List[str]]:
         """Run histogram filter pipeline, create dashboard, and generate analysis JSON."""
         try:
+            from tools.histogram_filter_tool import run_histogram_pipeline
+            from tools.create_histogram_dashboard import create_histogram_dashboard
+            from tools.analyze_histogram_stats import generate_histogram_analysis_json
+
             # Create output directory for histogram analysis
             histogram_dir = self.output_dir / "histogram_analysis"
             histogram_dir.mkdir(parents=True, exist_ok=True)
@@ -949,6 +1084,18 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
 - Height: {dims.get('height_mm', '?')} mm
 - Pin Count: {dims.get('pin_count', '?')}
 - Pin Pitch: {dims.get('pin_pitch_mm', '?')} mm
+"""
+
+        measured_pins = (result.pin_counter or {}).get('pins_detected')
+        if measured_pins:
+            base_prompt += f"""
+**INDEPENDENT PIN COUNTER (YOLO) MEASUREMENT: {measured_pins} pins physically detected.**
+This is a measured value from a dedicated pin-detection model — weigh it above
+any pin count implied by the marking. Also count the pins yourself in the photo.
+If the physically visible/measured pin count contradicts the pin count of the
+marked part number's package, that is STRONG counterfeit (remarking) evidence:
+score pin_count_match ≤ 20 and report a high-severity "pin_count" anomaly.
+Do NOT rationalize the discrepancy away by trusting the marking.
 """
 
         if dimension_analysis:
@@ -1162,6 +1309,21 @@ If you cannot find a specific dimension, use null. Be precise with numbers.
 
 **CRITICAL:** Use these exact criteria consistently. The same IC image should ALWAYS receive the same scores. Be objective, not subjective.
 Do NOT provide bounding boxes - focus on detailed descriptions of anomalies instead.
+
+**MULTI-PACKAGE DATASHEET RULE (READ CAREFULLY):**
+Many parts are offered in SEVERAL packages (e.g. the same part number family in
+PDIP, SOIC, TSSOP and VSSOP), and the extracted specifications or mechanical
+diagram may describe a DIFFERENT variant than the chip photographed.
+- If the observed package family differs from the variant in the provided
+  specs/diagram, FIRST check (in the datasheet, e.g. its front page or ordering
+  information) whether the part is also offered in the observed package.
+- If it is — or if you cannot rule it out — this is a document-variant mismatch,
+  NOT counterfeit evidence: do NOT create anomalies for package type, body
+  dimensions or pin pitch based on that variant; score package_type_match and
+  pin_pitch_match as 75 (inconclusive) and compare only variant-independent
+  evidence (markings, logo, pin count vs the observed package, surface).
+- Only treat a package mismatch as an anomaly when the datasheet clearly shows
+  the part was NEVER offered in the observed package.
 """
         
         # Add annotations context if available
@@ -1323,10 +1485,46 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
         This ensures consistent, justifiable scoring.
         """
         
+        # Deterministic pin cross-check BEFORE any weighting: remarked fakes
+        # carry a part number whose datasheet pin count contradicts the chip's
+        # physical pins. The YOLO count is measured; identify/datasheet counts
+        # are claimed. A large disagreement is hard counterfeit evidence that
+        # the visual model routinely misses (it trusts the marking).
+        pin_contradiction = False
+        expected_pins = 0
+        if result.parsed_specs:
+            expected_pins = (result.parsed_specs.get('package_dimensions') or {}).get('pin_count') or 0
+        if not expected_pins:
+            expected_pins = result.pin_count or 0
+        measured_pins = (result.pin_counter or {}).get('pins_detected') or 0
+        try:
+            expected_pins, measured_pins = int(expected_pins), int(measured_pins)
+        except (TypeError, ValueError):
+            expected_pins = measured_pins = 0
+        if expected_pins and measured_pins and abs(expected_pins - measured_pins) >= 3:
+            pin_contradiction = True
+            if result.anomalies is None:
+                result.anomalies = []
+            result.anomalies.append({
+                'type': 'pin_count',
+                'severity': 'high',
+                'description': (
+                    f"Physical pin count contradicts the marked part number: the "
+                    f"pin-counting model detected {measured_pins} pins, but "
+                    f"{result.part_number} is a {expected_pins}-pin device per its "
+                    f"datasheet. A part number printed on a package it never shipped "
+                    f"in is a classic remarking signature."),
+                'confidence': 0.9,
+            })
+            if result.visual_comparison and isinstance(result.visual_comparison.get('attribute_scores'), dict):
+                result.visual_comparison['attribute_scores']['pin_count_match'] = 10
+            print(f"  🚨 Pin contradiction: YOLO={measured_pins} vs datasheet={expected_pins} "
+                  f"for {result.part_number}")
+
         scores = []
         weights = []
         score_details = {}
-        
+
         # Dimension analysis score (REDUCED WEIGHT: 35%)
         if result.dimension_analysis:
             dim_data = result.dimension_analysis
@@ -1487,6 +1685,10 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
         
         # Apply anomaly penalty
         final_score = max(0, base_score - anomaly_penalty)
+        if pin_contradiction:
+            # a part number that never shipped with this pin count cannot be
+            # "likely authentic" no matter how clean the package looks
+            final_score = min(final_score, 40.0)
         result.authenticity_score = round(final_score, 1)
         
         # Store comprehensive weighted scores breakdown for transparency
@@ -1583,7 +1785,8 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
     
     def _generate_report(self, result: DetectionResult) -> str:
         """Step 7: Generate PDF report with bboxes and analysis"""
-        
+
+        _cleanup_pdf_images()  # drop shrunk JPEGs left over from the previous report
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_filename = f"detection_report_{Path(result.ic_image_path).stem}_{timestamp_str}.pdf"
         report_path = self.output_dir / report_filename
@@ -1691,7 +1894,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                             story.append(Spacer(1, 0.08*inch))
                         
                         # Add image with proportional scaling
-                        ic_img = RLImage(img_path, width=5.5*inch, height=4*inch, kind='proportional')
+                        ic_img = RLImage(_shrink_for_pdf(img_path), width=5.5*inch, height=4*inch, kind='proportional')
                         story.append(ic_img)
                         story.append(Spacer(1, 0.12*inch))
                     else:
@@ -2015,7 +2218,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                         ))
                         story.append(Spacer(1, 0.1*inch))
                         
-                        textbox_img = RLImage(str(textbox_path_obj), width=5.5*inch, height=4*inch, kind='proportional')
+                        textbox_img = RLImage(_shrink_for_pdf(str(textbox_path_obj)), width=5.5*inch, height=4*inch, kind='proportional')
                         story.append(textbox_img)
                         story.append(Spacer(1, 0.12*inch))
                     else:
@@ -2030,7 +2233,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
             story.append(Paragraph("PIN COUNTER RESULTS", styles['Heading2']))
             story.append(Spacer(1, 0.08*inch))
             
-            pin_viz_img = RLImage(result.pin_visualization, width=5.5*inch, height=4*inch, kind='proportional')
+            pin_viz_img = RLImage(_shrink_for_pdf(result.pin_visualization), width=5.5*inch, height=4*inch, kind='proportional')
             story.append(pin_viz_img)
             story.append(Spacer(1, 0.12*inch))
             
@@ -2070,7 +2273,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
             story.append(Spacer(1, 0.08*inch))
             
             # Image with detected bbox (ensure it fits - max 5.5 inches width)
-            dim_viz = RLImage(result.dimension_visualization, width=5.5*inch, height=4*inch, kind='proportional')
+            dim_viz = RLImage(_shrink_for_pdf(result.dimension_visualization), width=5.5*inch, height=4*inch, kind='proportional')
             story.append(dim_viz)
             story.append(Spacer(1, 0.12*inch))
             
@@ -2341,7 +2544,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                 try:
                     dashboard_path = Path(result.histogram_dashboard)
                     if dashboard_path.exists():
-                        dashboard_img = RLImage(str(dashboard_path), width=5.5*inch, height=4.5*inch, kind='proportional')
+                        dashboard_img = RLImage(_shrink_for_pdf(str(dashboard_path)), width=5.5*inch, height=4.5*inch, kind='proportional')
                         story.append(dashboard_img)
                         story.append(Spacer(1, 0.12*inch))
                 except Exception as e:
@@ -2386,7 +2589,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                                 story.append(Spacer(1, 0.05*inch))
                                 
                                 # Add strip image (strips are wide, so use full width)
-                                strip_img = RLImage(str(strip_path_obj), width=7*inch, height=1.75*inch, kind='proportional')
+                                strip_img = RLImage(_shrink_for_pdf(str(strip_path_obj)), width=7*inch, height=1.75*inch, kind='proportional')
                                 story.append(strip_img)
                                 story.append(Spacer(1, 0.1*inch))
                             else:
@@ -2550,7 +2753,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                 if img_path_obj.exists():
                     story.append(Paragraph(f"<b>Visual Analysis #{idx}</b>", styles['Heading3']))
                     story.append(Spacer(1, 0.05*inch))
-                    hardcoded_img = RLImage(str(img_path_obj), width=5.5*inch, height=4*inch, kind='proportional')
+                    hardcoded_img = RLImage(_shrink_for_pdf(str(img_path_obj)), width=5.5*inch, height=4*inch, kind='proportional')
                     story.append(hardcoded_img)
                     story.append(Spacer(1, 0.1*inch))
                 else:
@@ -2567,7 +2770,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                     # Skip if no anomalies
                     story.append(Paragraph("<b>No anomalies detected. IC appears authentic.</b>", styles['Normal']))
                     if Path(img_path).exists():
-                        clean_img = RLImage(img_path, width=5*inch, height=4.5*inch, kind='proportional')
+                        clean_img = RLImage(_shrink_for_pdf(img_path), width=5*inch, height=4.5*inch, kind='proportional')
                         story.append(clean_img)
                     break
                 
@@ -2605,7 +2808,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                 
                 # Annotated Image (ensure it fits - max 5.5 inches width)
                 if Path(img_path).exists():
-                    anom_img = RLImage(img_path, width=5.5*inch, height=5.0*inch, kind='proportional')
+                    anom_img = RLImage(_shrink_for_pdf(img_path), width=5.5*inch, height=5.0*inch, kind='proportional')
                     story.append(anom_img)
                 
                 if i < len(annotated_images):
@@ -2644,7 +2847,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
             
             # Show diagram (ensure it fits within page margins)
             try:
-                diagram_img = RLImage(result.mechanical_diagram_path, width=5.5*inch, height=7*inch, kind='proportional')
+                diagram_img = RLImage(_shrink_for_pdf(result.mechanical_diagram_path), width=5.5*inch, height=7*inch, kind='proportional')
                 story.append(diagram_img)
                 story.append(Spacer(1, 0.15*inch))
             except Exception as e:
@@ -2767,7 +2970,7 @@ Do NOT provide bounding boxes - focus on detailed descriptions of anomalies inst
                             # Get the image path from the element
                             img_path = element._filename if hasattr(element, '_filename') else None
                             if img_path and Path(img_path).exists():
-                                new_img = RLImage(img_path, width=new_width, height=new_height, kind='proportional')
+                                new_img = RLImage(_shrink_for_pdf(img_path), width=new_width, height=new_height, kind='proportional')
                                 new_story.append(new_img)
                             else:
                                 new_story.append(element)  # Keep original if we can't resize

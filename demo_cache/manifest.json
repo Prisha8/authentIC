@@ -1,0 +1,44 @@
+{
+  "demos": [
+    {
+      "demo_id": "qfp64-stm32",
+      "session_id": "a7c9f96c-8459-401b-968f-68af6d4d602b",
+      "title": "STM32F103RCT6 (LQFP-64)",
+      "description": "ARM Cortex-M3 microcontroller, 64-pin quad flat package",
+      "expected_verdict": "LIKELY AUTHENTIC",
+      "part_number": "STM32F103RCT6",
+      "package_type": "LQFP",
+      "thumbnail": "history/a7c9f96c-8459-401b-968f-68af6d4d602b/images/thumbnail.png"
+    },
+    {
+      "demo_id": "qfp64-ad7606",
+      "session_id": "bbdb4912-6a89-41ed-a829-29e0d9312c70",
+      "title": "AD7606BSTZ (TQFP-64)",
+      "description": "8-channel simultaneous-sampling ADC, 64-pin quad flat package",
+      "expected_verdict": "LIKELY AUTHENTIC",
+      "part_number": "AD7606BSTZ",
+      "package_type": "TQFP",
+      "thumbnail": "history/bbdb4912-6a89-41ed-a829-29e0d9312c70/images/thumbnail.png"
+    },
+    {
+      "demo_id": "dip8-remarked",
+      "session_id": "771bcecc-008f-4cfc-8dba-63b80f2d7d0f",
+      "title": "SN74LS138N (DIP-8)",
+      "description": "3-to-8 line decoder marking on an 8-pin dual in-line package",
+      "expected_verdict": "LIKELY COUNTERFEIT",
+      "part_number": "SN74LS138N",
+      "package_type": "DIP",
+      "thumbnail": "history/771bcecc-008f-4cfc-8dba-63b80f2d7d0f/images/thumbnail.png"
+    },
+    {
+      "demo_id": "soic16-si8902",
+      "session_id": "8a392a7e-a779-436f-896d-dcd2d2bb5e14",
+      "title": "Si8902B (SOIC-16)",
+      "description": "Isolated ADC, 16-pin small-outline package",
+      "expected_verdict": "LIKELY AUTHENTIC",
+      "part_number": "Si8902B",
+      "package_type": "SOIC",
+      "thumbnail": "history/8a392a7e-a779-436f-896d-dcd2d2bb5e14/images/thumbnail.png"
+    }
+  ]
+}

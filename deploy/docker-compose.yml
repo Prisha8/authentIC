@@ -1,0 +1,65 @@
+# authentIC public site — run from the repo root:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# Expects a .env file at the repo root with at least:
+#   GEMINI_API_KEY=...          TAVILY_API_KEY=...
+#   MODAL_TOKEN_ID=...          MODAL_TOKEN_SECRET=...
+#   DB_PASSWORD=<pick one>
+#
+# Cloudflare Tunnel (runs on the host already) gets a new ingress rule:
+#   authentic.<your-domain> -> http://localhost:8090
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: authentic-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    env_file:
+      - ../.env
+    environment:
+      GPU_BACKEND: modal
+      EMBEDDING_BACKEND: fastembed
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: counterfeit_ic
+      DB_USER: authentic
+      DB_PASSWORD: ${DB_PASSWORD:-authentic}
+    volumes:
+      - ../data:/app/data
+      - ../demo_cache:/app/demo_cache
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: authentic-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: counterfeit_ic
+      POSTGRES_USER: authentic
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-authentic}
+    command: >-
+      postgres -c shared_buffers=128MB -c max_connections=20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentic -d counterfeit_ic"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+volumes:
+  pgdata:
